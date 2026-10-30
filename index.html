@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Chess Companion Hub</title>
+
+  <!-- ================================================================
+       DEPENDENCIES (CDN only, pinned versions — see CLAUDE.md)
+       Order matters: jQuery must load before chessboard.js.
+       ================================================================ -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <style>
+    /* Small amount of custom CSS for things Tailwind utilities can't express cleanly. */
+    html, body { background-color: #0f172a; /* slate-900 */ }
+    /* Stop double-tap zoom and text selection on the big tap targets. */
+    .no-select { -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    /* Tabular digits keep the clock from jittering as numbers change. */
+    .tabular { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+
+<body class="h-full bg-slate-900 text-slate-100 antialiased">
+  <div class="flex h-full flex-col">
+
+    <!-- ================================================================
+         TOP NAVIGATION — three tabs
+         ================================================================ -->
+    <header class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/95 px-4 py-2">
+      <div class="flex items-center gap-2 font-semibold">
+        <span class="text-2xl text-emerald-500" aria-hidden="true">&#9822;</span>
+        <span class="hidden sm:inline">Chess Companion Hub</span>
+      </div>
+      <nav class="flex gap-1 rounded-xl bg-slate-800 p-1" role="tablist" aria-label="Sections">
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="clock">Clock</button>
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="play">Play</button>
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="facts">Facts</button>
+      </nav>
+    </header>
+
+    <main class="relative min-h-0 flex-1">
+
+      <!-- ================================================================
+           TAB 1: DUAL CHESS CLOCK
+           ================================================================ -->
+      <section id="view-clock" class="tab-view hidden h-full" role="tabpanel">
+        <p class="p-6 text-slate-400">Dual clock — coming in step 3.</p>
+      </section>
+
+      <!-- ================================================================
+           TAB 2: LOCAL MULTIPLAYER (Pass-and-Play)
+           ================================================================ -->
+      <section id="view-play" class="tab-view hidden h-full overflow-y-auto" role="tabpanel">
+        <p class="p-6 text-slate-400">Pass-and-play board — coming in steps 4–5.</p>
+      </section>
+
+      <!-- ================================================================
+           TAB 3: FACTS ENGINE
+           ================================================================ -->
+      <section id="view-facts" class="tab-view hidden h-full overflow-y-auto" role="tabpanel">
+        <p class="p-6 text-slate-400">Facts engine — coming in step 6.</p>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+  'use strict';
+
+  /* ==================================================================
+     TABS
+     Switches between the three views without reloading. The active tab
+     is mirrored in location.hash (#clock, #play, #facts) so a refresh
+     keeps you where you were.
+     ================================================================== */
+  const Tabs = {
+    names: ['clock', 'play', 'facts'],
+    // Listeners other modules can register, called with the tab name when it becomes visible
+    // (e.g. chessboard.js must resize once its container is shown).
+    onShow: [],
+
+    init() {
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => Tabs.show(btn.dataset.tab));
+      });
+      window.addEventListener('hashchange', () => Tabs.show(Tabs.fromHash()));
+      Tabs.show(Tabs.fromHash());
+    },
+
+    fromHash() {
+      const name = location.hash.slice(1);
+      return Tabs.names.includes(name) ? name : 'clock';
+    },
+
+    show(name) {
+      document.querySelectorAll('.tab-view').forEach((view) => {
+        view.classList.toggle('hidden', view.id !== 'view-' + name);
+      });
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        const active = btn.dataset.tab === name;
+        btn.setAttribute('aria-selected', String(active));
+        btn.classList.toggle('bg-emerald-500', active);
+        btn.classList.toggle('text-slate-900', active);
+        btn.classList.toggle('text-slate-300', !active);
+        btn.classList.toggle('hover:bg-slate-700', !active);
+      });
+      if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+      Tabs.onShow.forEach((fn) => fn(name));
+    },
+  };
+
+  /* ==================================================================
+     BOOT
+     ================================================================== */
+  document.addEventListener('DOMContentLoaded', () => {
+    Tabs.init();
+  });
+  </script>
+</body>
+</html>
