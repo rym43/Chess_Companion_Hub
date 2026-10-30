@@ -23,6 +23,16 @@
     /* Tabular digits keep the clock from jittering as numbers change. */
     .tabular { font-variant-numeric: tabular-nums; }
   </style>
+
+  <!-- Reusable component classes, built from Tailwind utilities. -->
+  <style type="text/tailwindcss">
+    @layer components {
+      .clock-side { -webkit-tap-highlight-color: transparent; @apply select-none touch-manipulation relative flex min-h-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-2xl transition-colors duration-150 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300; }
+      .ctrl-btn   { @apply flex items-center gap-1 rounded-xl bg-slate-800 px-2.5 py-2 sm:gap-1.5 sm:px-3 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800; }
+      .preset-btn { @apply rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-left font-semibold transition hover:border-emerald-500; }
+      .num-input  { @apply mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-base text-slate-100 focus:border-emerald-500 focus:outline-none; }
+    }
+  </style>
 </head>
 
 <body class="h-full bg-slate-900 text-slate-100 antialiased">
@@ -52,7 +62,73 @@
            TAB 1: DUAL CHESS CLOCK
            ================================================================ -->
       <section id="view-clock" class="tab-view hidden h-full" role="tabpanel">
-        <p class="p-6 text-slate-400">Dual clock — coming in step 3.</p>
+        <!-- Portrait: halves stacked, top half rotated 180° for the player across the table.
+             Landscape: halves side by side, no rotation. -->
+        <div class="flex h-full flex-col gap-2 p-2 landscape:flex-row">
+
+          <!-- Top (portrait) / left (landscape) half -->
+          <button id="clock-top" class="clock-side" aria-live="off">
+            <div class="clock-face flex flex-col items-center gap-2 portrait:rotate-180">
+              <span class="clock-name text-sm font-semibold uppercase tracking-widest"></span>
+              <span class="clock-time tabular font-bold leading-none" style="font-size: clamp(3.5rem, 18vmin, 11rem)"></span>
+              <span class="clock-info text-sm font-medium"></span>
+              <span class="clock-flag mt-2 hidden animate-pulse rounded-xl bg-red-950/90 px-6 py-2 text-3xl font-black tracking-wider text-red-50">FLAGGED!</span>
+            </div>
+          </button>
+
+          <!-- Control strip between the halves -->
+          <div class="flex shrink-0 flex-wrap items-center justify-center gap-1.5 sm:gap-2 landscape:flex-col landscape:flex-nowrap">
+            <button id="clock-pause" class="ctrl-btn"><span aria-hidden="true">&#10074;&#10074;</span><span class="ctrl-label">Pause</span></button>
+            <button id="clock-reset" class="ctrl-btn"><span aria-hidden="true">&#8634;</span><span>Reset</span></button>
+            <button id="clock-swap" class="ctrl-btn"><span aria-hidden="true">&#8645;</span><span>Swap</span></button>
+            <button id="clock-settings-btn" class="ctrl-btn" title="Time control"><span aria-hidden="true">&#9201;</span><span id="clock-control-label" class="tabular">5 | 0</span></button>
+            <button id="clock-fullscreen" class="ctrl-btn" title="Full screen"><span aria-hidden="true">&#9974;</span><span class="ctrl-label hidden sm:inline">Full</span></button>
+          </div>
+
+          <!-- Bottom (portrait) / right (landscape) half -->
+          <button id="clock-bottom" class="clock-side" aria-live="off">
+            <div class="clock-face flex flex-col items-center gap-2">
+              <span class="clock-name text-sm font-semibold uppercase tracking-widest"></span>
+              <span class="clock-time tabular font-bold leading-none" style="font-size: clamp(3.5rem, 18vmin, 11rem)"></span>
+              <span class="clock-info text-sm font-medium"></span>
+              <span class="clock-flag mt-2 hidden animate-pulse rounded-xl bg-red-950/90 px-6 py-2 text-3xl font-black tracking-wider text-red-50">FLAGGED!</span>
+            </div>
+          </button>
+        </div>
+
+        <!-- Time-control settings overlay -->
+        <div id="clock-settings" class="absolute inset-0 z-20 hidden items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div class="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="clock-settings-title">
+            <div class="mb-4 flex items-center justify-between">
+              <h2 id="clock-settings-title" class="text-lg font-semibold">Time control</h2>
+              <button id="clock-settings-close" class="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-700 hover:text-slate-100" aria-label="Close">&#10005;</button>
+            </div>
+
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Presets</p>
+            <div class="mb-5 grid grid-cols-2 gap-2">
+              <button class="preset-btn" data-min="1"  data-inc="0"><span class="block text-xs text-slate-400">Bullet</span>1 min</button>
+              <button class="preset-btn" data-min="3"  data-inc="0"><span class="block text-xs text-slate-400">Blitz</span>3 min</button>
+              <button class="preset-btn" data-min="5"  data-inc="0"><span class="block text-xs text-slate-400">Blitz</span>5 min</button>
+              <button class="preset-btn" data-min="10" data-inc="0"><span class="block text-xs text-slate-400">Rapid</span>10 min</button>
+            </div>
+
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Custom</p>
+            <form id="clock-custom" class="grid grid-cols-3 gap-2" novalidate>
+              <label class="text-xs text-slate-400">Minutes
+                <input name="min" type="number" min="0" max="180" step="1" inputmode="numeric" class="num-input">
+              </label>
+              <label class="text-xs text-slate-400">Seconds
+                <input name="sec" type="number" min="0" max="59" step="1" inputmode="numeric" class="num-input">
+              </label>
+              <label class="text-xs text-slate-400">Increment (s)
+                <input name="inc" type="number" min="0" max="60" step="1" inputmode="numeric" class="num-input">
+              </label>
+              <p id="clock-custom-error" class="col-span-3 hidden text-sm text-red-400"></p>
+              <button type="submit" class="col-span-3 mt-1 rounded-xl bg-emerald-500 py-2.5 font-semibold text-slate-900 transition hover:bg-emerald-400">Apply custom time</button>
+            </form>
+            <p class="mt-3 text-xs text-slate-500">Changing the time control resets both clocks.</p>
+          </div>
+        </div>
       </section>
 
       <!-- ================================================================
@@ -332,10 +408,296 @@
   };
 
   /* ==================================================================
+     TAB 1: DUAL CHESS CLOCK
+     Side 0 = White, side 1 = Black (indices into the ChessTimer).
+     Tapping the half of the player whose clock is running ends their
+     move: their increment is added and the opponent's clock starts.
+     Before the first move, a tap on either half starts White's clock.
+     ================================================================== */
+  const DualClock = {
+    WHITE: 0,
+    BLACK: 1,
+    timer: null,
+    whiteOnBottom: true, // Swap Sides flips which half each colour uses
+    control: Store.get('clockControl', { initialMs: 5 * 60000, incrementMs: 0 }),
+    wakeLock: null,
+    el: {},
+
+    // Colour/state classes for a half; layout classes live in .clock-side.
+    STYLES: {
+      idle:    'bg-slate-800 text-slate-100 hover:bg-slate-700',
+      active:  'bg-emerald-500 text-slate-900',
+      low:     'bg-amber-400 text-slate-900',      // active with under 10 s left
+      waiting: 'bg-slate-800 text-slate-500',
+      paused:  'bg-emerald-950 text-emerald-200 ring-2 ring-inset ring-emerald-700',
+      flagged: 'bg-red-600 text-white',
+      winner:  'bg-slate-800 text-emerald-400',
+    },
+
+    init() {
+      const $ = (id) => document.getElementById(id);
+      DualClock.el = {
+        top: $('clock-top'),
+        bottom: $('clock-bottom'),
+        pause: $('clock-pause'),
+        reset: $('clock-reset'),
+        swap: $('clock-swap'),
+        settingsBtn: $('clock-settings-btn'),
+        controlLabel: $('clock-control-label'),
+        fullscreen: $('clock-fullscreen'),
+        settings: $('clock-settings'),
+        settingsClose: $('clock-settings-close'),
+        customForm: $('clock-custom'),
+        customError: $('clock-custom-error'),
+      };
+      const el = DualClock.el;
+
+      DualClock.timer = new ChessTimer({
+        initialMs: DualClock.control.initialMs,
+        incrementMs: DualClock.control.incrementMs,
+        onUpdate: DualClock.render,
+        onFlag: DualClock.handleFlag,
+      });
+
+      // pointerdown (not click) so a tap registers instantly, with no click delay.
+      el.top.addEventListener('pointerdown', (e) => { e.preventDefault(); DualClock.press(DualClock.colorAt('top')); });
+      el.bottom.addEventListener('pointerdown', (e) => { e.preventDefault(); DualClock.press(DualClock.colorAt('bottom')); });
+
+      el.pause.addEventListener('click', DualClock.togglePause);
+      el.reset.addEventListener('click', DualClock.reset);
+      el.swap.addEventListener('click', DualClock.swapSides);
+      el.settingsBtn.addEventListener('click', DualClock.openSettings);
+      el.settingsClose.addEventListener('click', DualClock.closeSettings);
+      el.settings.addEventListener('pointerdown', (e) => { if (e.target === el.settings) DualClock.closeSettings(); });
+      el.customForm.addEventListener('submit', DualClock.applyCustom);
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => DualClock.setControl(Number(btn.dataset.min) * 60000, Number(btn.dataset.inc) * 1000));
+      });
+
+      // Fullscreen is optional (unsupported on iPhone Safari): hide the button if missing.
+      if (document.documentElement.requestFullscreen) {
+        el.fullscreen.addEventListener('click', DualClock.toggleFullscreen);
+        document.addEventListener('fullscreenchange', DualClock.render);
+      } else {
+        el.fullscreen.classList.add('hidden');
+      }
+
+      // Control buttons shouldn't keep focus, or Space would re-trigger them.
+      document.querySelectorAll('#view-clock .ctrl-btn').forEach((btn) => btn.addEventListener('click', () => btn.blur()));
+
+      document.addEventListener('keydown', DualClock.handleKey);
+
+      // Re-acquire the screen wake lock after returning to the page (browsers drop it when hidden).
+      document.addEventListener('visibilitychange', DualClock.syncWakeLock);
+
+      DualClock.render();
+    },
+
+    /** Which colour is shown in the given half ('top' or 'bottom'). */
+    colorAt(pos) {
+      const bottomColor = DualClock.whiteOnBottom ? DualClock.WHITE : DualClock.BLACK;
+      return pos === 'bottom' ? bottomColor : 1 - bottomColor;
+    },
+
+    /** The half element displaying a colour. */
+    sideEl(color) {
+      return DualClock.colorAt('bottom') === color ? DualClock.el.bottom : DualClock.el.top;
+    },
+
+    settingsOpen() { return !DualClock.el.settings.classList.contains('hidden'); },
+
+    /** A player tapped their half of the screen. */
+    press(color) {
+      const t = DualClock.timer;
+      if (DualClock.settingsOpen()) return;
+      if (t.state === 'idle') {
+        t.start(DualClock.WHITE);
+        DualClock.feedback();
+      } else if (t.state === 'running' && color === t.active) {
+        if (t.switchTurn()) DualClock.feedback();
+      }
+      // Taps on the waiting side, or while paused/flagged, are ignored on purpose
+      // so a stray touch can't hand the move to the wrong player.
+      DualClock.syncWakeLock();
+    },
+
+    /** Sound + a short vibration (on devices that support it) for each clock press. */
+    feedback() {
+      Sound.tap();
+      if (navigator.vibrate) navigator.vibrate(15);
+    },
+
+    /** Keyboard: Space/Enter presses the running clock (or starts it); P pauses/resumes. */
+    handleKey(e) {
+      if (document.getElementById('view-clock').classList.contains('hidden')) return;
+      if (DualClock.settingsOpen()) {
+        if (e.key === 'Escape') DualClock.closeSettings();
+        return;
+      }
+      if (e.code === 'Space' || e.key === 'Enter') {
+        e.preventDefault();
+        const t = DualClock.timer;
+        DualClock.press(t.state === 'idle' ? DualClock.WHITE : t.active);
+      } else if (e.key === 'p' || e.key === 'P') {
+        DualClock.togglePause();
+      }
+    },
+
+    togglePause() {
+      const t = DualClock.timer;
+      if (t.state === 'running') t.pause();
+      else if (t.state === 'paused') t.resume();
+      DualClock.syncWakeLock();
+    },
+
+    reset() {
+      DualClock.timer.reset();
+      DualClock.syncWakeLock();
+    },
+
+    /** Swap which half each player uses (e.g. players changed seats). Times follow the player. */
+    swapSides() {
+      if (DualClock.timer.state === 'running') return;
+      DualClock.whiteOnBottom = !DualClock.whiteOnBottom;
+      DualClock.render();
+    },
+
+    handleFlag() {
+      Sound.flag();
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      DualClock.syncWakeLock();
+    },
+
+    // ---- time control settings ----
+
+    openSettings() {
+      DualClock.timer.pause(); // never let time run behind the dialog
+      const { initialMs, incrementMs } = DualClock.control;
+      const form = DualClock.el.customForm;
+      const totalSec = Math.round(initialMs / 1000);
+      form.min.value = Math.floor(totalSec / 60);
+      form.sec.value = totalSec % 60;
+      form.inc.value = Math.round(incrementMs / 1000);
+      DualClock.el.customError.classList.add('hidden');
+      DualClock.el.settings.classList.remove('hidden');
+      DualClock.el.settings.classList.add('flex');
+      DualClock.render();
+    },
+
+    closeSettings() {
+      DualClock.el.settings.classList.add('hidden');
+      DualClock.el.settings.classList.remove('flex');
+    },
+
+    /** Validate the custom form; on success apply it. */
+    applyCustom(e) {
+      e.preventDefault();
+      const form = DualClock.el.customForm;
+      const read = (input) => (input.value.trim() === '' ? 0 : Number(input.value));
+      const min = read(form.min), sec = read(form.sec), inc = read(form.inc);
+      const valid = [min, sec, inc].every((n) => Number.isInteger(n) && n >= 0)
+        && min <= 180 && sec <= 59 && inc <= 60;
+      let error = '';
+      if (!valid) error = 'Use whole numbers: minutes 0–180, seconds 0–59, increment 0–60.';
+      else if (min === 0 && sec === 0) error = 'Starting time must be more than zero.';
+      if (error) {
+        DualClock.el.customError.textContent = error;
+        DualClock.el.customError.classList.remove('hidden');
+        return;
+      }
+      DualClock.setControl((min * 60 + sec) * 1000, inc * 1000);
+    },
+
+    /** Apply a time control (preset or custom), remember it, and reset both clocks. */
+    setControl(initialMs, incrementMs) {
+      DualClock.control = { initialMs, incrementMs };
+      Store.set('clockControl', DualClock.control);
+      DualClock.timer.configure(initialMs, incrementMs);
+      DualClock.closeSettings();
+      DualClock.syncWakeLock();
+    },
+
+    // ---- browser integrations ----
+
+    toggleFullscreen() {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen().catch(() => {});
+    },
+
+    /** Keep the screen awake only while a clock is running (where supported). */
+    async syncWakeLock() {
+      const want = DualClock.timer.state === 'running' && document.visibilityState === 'visible';
+      try {
+        if (want && !DualClock.wakeLock && 'wakeLock' in navigator) {
+          DualClock.wakeLock = await navigator.wakeLock.request('screen');
+          DualClock.wakeLock.addEventListener('release', () => { DualClock.wakeLock = null; });
+        } else if (!want && DualClock.wakeLock) {
+          await DualClock.wakeLock.release();
+          DualClock.wakeLock = null;
+        }
+      } catch (err) { /* wake lock is a nice-to-have; ignore failures */ }
+    },
+
+    // ---- rendering ----
+
+    /** Visual state key (see STYLES) and helper text for one colour. */
+    sideState(color) {
+      const t = DualClock.timer;
+      const moves = `Moves: ${t.moves[color]}`;
+      switch (t.state) {
+        case 'idle':
+          return { style: 'idle', info: color === DualClock.WHITE ? 'Tap anywhere to start' : "Tap to start White's clock" };
+        case 'running':
+          if (color !== t.active) return { style: 'waiting', info: moves };
+          return { style: t.timeOf(color) < 10000 ? 'low' : 'active', info: moves };
+        case 'paused':
+          return { style: color === t.active ? 'paused' : 'waiting', info: color === t.active ? 'Paused' : moves };
+        case 'flagged':
+          return color === t.flagged
+            ? { style: 'flagged', info: 'Out of time' }
+            : { style: 'winner', info: 'Wins on time' };
+      }
+    },
+
+    render() {
+      const t = DualClock.timer;
+      const el = DualClock.el;
+      if (!t) return; // the ChessTimer constructor fires onUpdate before it's assigned
+
+      [DualClock.WHITE, DualClock.BLACK].forEach((color) => {
+        const side = DualClock.sideEl(color);
+        const { style, info } = DualClock.sideState(color);
+        side.className = 'clock-side ' + DualClock.STYLES[style];
+        side.querySelector('.clock-name').textContent = color === DualClock.WHITE ? '♔ White' : '♚ Black';
+        side.querySelector('.clock-time').textContent = formatTime(t.timeOf(color));
+        side.querySelector('.clock-info').textContent = info;
+        side.querySelector('.clock-flag').classList.toggle('hidden', style !== 'flagged');
+        side.setAttribute('aria-label', `${color === DualClock.WHITE ? 'White' : 'Black'} clock, ${formatTime(t.timeOf(color))}. ${info}`);
+      });
+
+      el.pause.querySelector('.ctrl-label').textContent = t.state === 'paused' ? 'Resume' : 'Pause';
+      el.pause.firstElementChild.innerHTML = t.state === 'paused' ? '&#9654;' : '&#10074;&#10074;';
+      el.pause.disabled = t.state !== 'running' && t.state !== 'paused';
+      el.swap.disabled = t.state === 'running';
+      el.controlLabel.textContent = controlLabel(DualClock.control);
+      el.fullscreen.querySelector('.ctrl-label').textContent = document.fullscreenElement ? 'Exit' : 'Full';
+
+      // Highlight the preset that matches the current control, if any.
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        const match = Number(btn.dataset.min) * 60000 === DualClock.control.initialMs
+          && Number(btn.dataset.inc) * 1000 === DualClock.control.incrementMs;
+        btn.classList.toggle('border-emerald-500', match);
+        btn.classList.toggle('bg-emerald-500/10', match);
+      });
+    },
+  };
+
+  /* ==================================================================
      BOOT
      ================================================================== */
   document.addEventListener('DOMContentLoaded', () => {
     Sound.init();
+    DualClock.init();
     Tabs.init();
   });
   </script>
