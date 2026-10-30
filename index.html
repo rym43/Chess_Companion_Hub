@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- The page is already dark: this stops phone browsers' "dark mode for websites"
+       from auto-darkening it again (which turns the light board squares dark). -->
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f172a">
   <title>Chess Companion Hub</title>
 
   <!-- ================================================================
@@ -31,8 +35,10 @@
       #view-play .play-layout { flex-direction: row; align-items: flex-start; justify-content: center; }
       #view-play .play-aside  { width: 20rem; flex-shrink: 0; }
     }
-    #play-board .white-1e1d7 { background-color: #dfe5ec; color: #6b7f95; }
-    #play-board .black-3c85d { background-color: #6b7f95; color: #dfe5ec; }
+    /* Square colours come from CSS variables set by Play.applyTheme (board colour picker). */
+    #play-board { --sq-light: #dfe5ec; --sq-dark: #6b7f95; }
+    #play-board .white-1e1d7 { background-color: var(--sq-light); color: var(--sq-dark); }
+    #play-board .black-3c85d { background-color: var(--sq-dark); color: var(--sq-light); }
     #play-board .square-55d63 { position: relative; }
     /* Highlights are drawn with inset shadows / gradients so the square colour still shows through. */
     #play-board .sq-last     { box-shadow: inset 0 0 0 999px rgba(16, 185, 129, 0.32); }   /* emerald-500 */
@@ -218,6 +224,11 @@
               <span class="text-slate-300">Clock</span>
               <select id="play-control" class="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none disabled:opacity-50" title="Can be changed before the first move"></select>
             </label>
+
+            <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2.5 text-sm">
+              <span class="text-slate-300">Board colours</span>
+              <div id="play-themes" class="flex gap-2" role="group" aria-label="Board colours"></div>
+            </div>
 
             <div class="rounded-xl bg-slate-800">
               <div class="flex items-center justify-between border-b border-slate-700 px-4 py-2">
@@ -876,6 +887,14 @@
     timer: null,
     clockOn: true,
     controlChoice: Store.get('playControl', '600|0'),
+    // Board colour themes: [light square, dark square]. The choice is remembered per browser.
+    THEMES: {
+      slate: { name: 'Slate', light: '#dfe5ec', dark: '#6b7f95' },
+      green: { name: 'Green', light: '#eeeed2', dark: '#769656' },
+      wood:  { name: 'Wood',  light: '#f0d9b5', dark: '#b58863' },
+      blue:  { name: 'Blue',  light: '#dee3e6', dark: '#8ca2ad' },
+    },
+    theme: Store.get('boardTheme', 'slate'),
     disarmTimers: new Map(), // button -> timeout for two-step confirmations
     el: {},
 
@@ -924,6 +943,8 @@
       Play.el.undo.addEventListener('click', Play.undo);
       Play.el.control.addEventListener('change', Play.changeControl);
       Play.el.flip.addEventListener('click', Play.flip);
+      Play.renderThemes();
+      Play.applyTheme(Play.theme);
       Play.el.promoCancel.addEventListener('click', Play.cancelPromotion);
       // Capture phase so we record the selection before chessboard.js's own mousedown handler runs.
       Play.el.wrap.addEventListener('pointerdown', Play.onPointerDown, { capture: true });
@@ -1025,6 +1046,39 @@
       Play.clockOn = control !== null;
       if (control) Play.timer.configure(control.initialMs, control.incrementMs);
       else Play.timer.reset();
+    },
+
+    // ---- board colours ----
+
+    /** One swatch button per theme, split diagonally into its light and dark square colours. */
+    renderThemes() {
+      document.getElementById('play-themes').replaceChildren(...Object.entries(Play.THEMES).map(([key, t]) => {
+        const btn = document.createElement('button');
+        btn.dataset.theme = key;
+        btn.title = t.name;
+        btn.setAttribute('aria-label', `${t.name} board`);
+        btn.className = 'h-7 w-7 rounded-md ring-offset-2 ring-offset-slate-800 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300';
+        btn.style.background = `linear-gradient(135deg, ${t.light} 50%, ${t.dark} 50%)`;
+        btn.addEventListener('click', () => Play.applyTheme(key));
+        return btn;
+      }));
+    },
+
+    /** Set the square colours (CSS variables survive chessboard.js redraws) and remember the choice. */
+    applyTheme(key) {
+      if (!Play.THEMES[key]) key = 'slate';
+      Play.theme = key;
+      Store.set('boardTheme', key);
+      const t = Play.THEMES[key];
+      const boardEl = document.getElementById('play-board');
+      boardEl.style.setProperty('--sq-light', t.light);
+      boardEl.style.setProperty('--sq-dark', t.dark);
+      document.querySelectorAll('#play-themes [data-theme]').forEach((btn) => {
+        const active = btn.dataset.theme === key;
+        btn.setAttribute('aria-pressed', String(active));
+        btn.classList.toggle('ring-2', active);
+        btn.classList.toggle('ring-emerald-500', active);
+      });
     },
 
     /** The dropdown is only enabled before the first move or after the game ends. */
