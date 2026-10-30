@@ -50,6 +50,7 @@
       .clock-side { -webkit-tap-highlight-color: transparent; @apply select-none touch-manipulation relative flex min-h-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-2xl transition-colors duration-150 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300; }
       .ctrl-btn   { @apply flex items-center gap-1 rounded-xl bg-slate-800 px-2.5 py-2 sm:gap-1.5 sm:px-3 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800; }
       .preset-btn { @apply rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-left font-semibold transition hover:border-emerald-500; }
+      .player-bar { @apply flex items-center justify-between gap-2 rounded-xl bg-slate-800 px-3 py-1.5 transition; }
       .num-input  { @apply mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-base text-slate-100 focus:border-emerald-500 focus:outline-none; }
     }
   </style>
@@ -159,6 +160,17 @@
 
           <!-- Board column (its width is set by Play.sizeBoard) -->
           <div id="play-board-col" class="flex max-w-full flex-col gap-2">
+            <!-- Player bar for the colour at the top of the board -->
+            <div id="play-bar-top" class="player-bar">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="bar-swatch h-3 w-3 shrink-0 rounded-full"></span>
+                <span class="bar-name text-sm font-semibold"></span>
+                <span class="bar-captured flex min-w-0 items-center overflow-hidden"></span>
+                <span class="bar-diff text-xs font-semibold text-slate-400"></span>
+              </div>
+              <span class="bar-clock tabular shrink-0 rounded-lg px-2.5 py-1 text-lg font-bold leading-none"></span>
+            </div>
+
             <div id="play-board-wrap" class="relative ring-2 ring-slate-700" style="touch-action: none">
               <div id="play-board"></div>
 
@@ -171,14 +183,46 @@
                 </div>
               </div>
             </div>
+
+            <!-- Player bar for the colour at the bottom of the board -->
+            <div id="play-bar-bottom" class="player-bar">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="bar-swatch h-3 w-3 shrink-0 rounded-full"></span>
+                <span class="bar-name text-sm font-semibold"></span>
+                <span class="bar-captured flex min-w-0 items-center overflow-hidden"></span>
+                <span class="bar-diff text-xs font-semibold text-slate-400"></span>
+              </div>
+              <span class="bar-clock tabular shrink-0 rounded-lg px-2.5 py-1 text-lg font-bold leading-none"></span>
+            </div>
           </div>
 
           <!-- Side panel -->
           <aside class="flex w-full max-w-xl flex-col gap-3 lg:w-80">
-            <div id="play-status" class="rounded-xl bg-slate-800 px-4 py-3 font-semibold" aria-live="polite"></div>
-            <div class="flex flex-wrap gap-2">
-              <button id="play-flip" class="ctrl-btn"><span aria-hidden="true">&#8645;</span><span>Flip board</span></button>
+            <div id="play-status-box" class="rounded-xl px-4 py-3 transition-colors" aria-live="polite">
+              <p id="play-status" class="font-semibold"></p>
+              <p id="play-substatus" class="mt-0.5 text-xs"></p>
             </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <button id="play-new" class="ctrl-btn justify-center"><span aria-hidden="true">&#10010;</span><span class="btn-label">New game</span></button>
+              <button id="play-undo" class="ctrl-btn justify-center"><span aria-hidden="true">&#8630;</span><span class="btn-label">Undo</span></button>
+              <button id="play-resign" class="ctrl-btn justify-center"><span aria-hidden="true">&#9873;</span><span class="btn-label">Resign</span></button>
+              <button id="play-flip" class="ctrl-btn justify-center"><span aria-hidden="true">&#8645;</span><span class="btn-label">Flip board</span></button>
+            </div>
+
+            <label class="flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2.5 text-sm">
+              <span class="text-slate-300">Clock</span>
+              <select id="play-control" class="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none disabled:opacity-50" title="Can be changed before the first move"></select>
+            </label>
+
+            <div class="rounded-xl bg-slate-800">
+              <div class="flex items-center justify-between border-b border-slate-700 px-4 py-2">
+                <h3 class="text-sm font-semibold">Moves</h3>
+                <span id="play-move-count" class="text-xs text-slate-400"></span>
+              </div>
+              <ol id="play-moves" class="tabular max-h-64 overflow-y-auto p-2 text-sm lg:max-h-[45vh]"></ol>
+            </div>
+
             <p class="text-xs text-slate-500">Drag a piece, or tap it and then tap a highlighted square.</p>
           </aside>
         </div>
@@ -367,6 +411,18 @@
     resume() {
       if (this.state !== 'paused') return;
       this._run();
+    }
+
+    /**
+     * Hand the clock to `side` without adding increment (used by Undo on the
+     * board). Time already spent is not refunded.
+     */
+    giveTurnTo(side) {
+      this._settle();
+      if (this.state === 'flagged' || this.state === 'idle') return;
+      this.active = side;
+      this.lastStamp = performance.now();
+      this.onUpdate();
     }
 
     /** Stop the clock without flagging (e.g. game ended on the board). */
@@ -750,16 +806,35 @@
      - Tap: tap one of your pieces, then a destination square. Taps are
        detected with pointer events on the board wrapper (pointerdown and
        pointerup on the same square), which work for mouse and touch.
+
+     Mini clock: a ChessTimer (side 0 = White, 1 = Black). Black's clock
+     starts when White makes the first move; each later move adds the
+     mover's increment and switches sides.
      ================================================================== */
   const Play = {
     PIECE_URL: 'https://cdn.jsdelivr.net/gh/oakmac/chessboardjs@v1.0.0/website/img/chesspieces/wikipedia/{piece}.png',
     PROMOTION_PIECES: [['q', 'Queen'], ['r', 'Rook'], ['b', 'Bishop'], ['n', 'Knight']],
+    PIECE_VALUES: { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 },
+    // Clock choices: 'none', 'seconds|increment', or 'clock' (copy Tab 1's time control).
+    CONTROL_OPTIONS: [
+      ['none', 'No clock'],
+      ['60|0', 'Bullet 1 | 0'],
+      ['180|0', 'Blitz 3 | 0'],
+      ['300|0', 'Blitz 5 | 0'],
+      ['600|0', 'Rapid 10 | 0'],
+      ['clock', 'Same as Clock tab'],
+    ],
 
     game: null,
     board: null,             // created lazily: chessboard.js needs a visible container to measure
     selected: null,          // square of the tapped/dragged piece, e.g. 'e2'
     pendingPromotion: null,  // { from, to, viaDrag } while the picker is open
     tap: null,               // { square, selectedBefore } between pointerdown and pointerup
+    result: null,            // { text, undoable } once the game has ended
+    timer: null,
+    clockOn: true,
+    controlChoice: Store.get('playControl', '600|0'),
+    disarmTimers: new Map(), // button -> timeout for two-step confirmations
     el: {},
 
     init() {
@@ -768,17 +843,44 @@
         view: $('view-play'),
         col: $('play-board-col'),
         wrap: $('play-board-wrap'),
+        barTop: $('play-bar-top'),
+        barBottom: $('play-bar-bottom'),
+        statusBox: $('play-status-box'),
         status: $('play-status'),
+        substatus: $('play-substatus'),
+        newGame: $('play-new'),
+        undo: $('play-undo'),
+        resign: $('play-resign'),
         flip: $('play-flip'),
+        control: $('play-control'),
+        moves: $('play-moves'),
+        moveCount: $('play-move-count'),
         promo: $('promo-picker'),
         promoChoices: $('promo-choices'),
         promoCancel: $('promo-cancel'),
       };
       Play.game = new Chess();
 
+      Play.buildControlOptions();
+      Play.timer = new ChessTimer({
+        initialMs: 600000,
+        incrementMs: 0,
+        onUpdate: Play.renderClocks,
+        onFlag: Play.handleFlag,
+      });
+      Play.applyControl();
+
       Tabs.onShow.push((name) => { if (name === 'play') Play.show(); });
       window.addEventListener('resize', () => { if (Play.isVisible()) Play.sizeBoard(); });
 
+      // New game only asks for confirmation while a game is in progress.
+      Play.el.newGame.addEventListener('click', () => {
+        if (Play.inProgress()) Play.confirmThen(Play.el.newGame, Play.newGame);
+        else Play.newGame();
+      });
+      Play.el.resign.addEventListener('click', () => Play.confirmThen(Play.el.resign, Play.resign));
+      Play.el.undo.addEventListener('click', Play.undo);
+      Play.el.control.addEventListener('change', Play.changeControl);
       Play.el.flip.addEventListener('click', Play.flip);
       Play.el.promoCancel.addEventListener('click', Play.cancelPromotion);
       // Capture phase so we record the selection before chessboard.js's own mousedown handler runs.
@@ -794,8 +896,9 @@
     /** Called whenever the Play tab becomes visible. */
     show() {
       if (!Play.board) Play.createBoard();
-      Play.sizeBoard();
+      Play.buildControlOptions(); // the "Same as Clock tab" label may have changed
       Play.render();
+      Play.sizeBoard();           // after render, so the player bars have their real height
     },
 
     createBoard() {
@@ -830,18 +933,200 @@
       Play.applyHighlights();   // ...so put them back
     },
 
-    /** Height used above/below the board by other elements (none yet). */
-    reservedBarHeight() { return 0; },
+    /** Height of the player bars above and below the board, plus the gaps between them. */
+    reservedBarHeight() {
+      return Play.el.barTop.offsetHeight + Play.el.barBottom.offsetHeight + 16;
+    },
 
     flip() {
       if (!Play.board) return;
       Play.board.flip();
       Play.applyHighlights(); // flip redraws the squares too
+      Play.render();          // the player bars swap ends with the board
+    },
+
+    /** True once the game has ended (board result, flag or resignation). */
+    isOver() { return Play.result !== null; },
+
+    /** Moves have been played and the game hasn't ended. */
+    inProgress() { return Play.game.history().length > 0 && !Play.isOver(); },
+
+    /** ChessTimer side index for a chess.js colour. */
+    sideOf(color) { return color === 'w' ? 0 : 1; },
+
+    other(color) { return color === 'w' ? 'b' : 'w'; },
+
+    // ---- time control ----
+
+    buildControlOptions() {
+      Play.el.control.replaceChildren(...Play.CONTROL_OPTIONS.map(([value, label]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value === 'clock' ? `${label} (${controlLabel(DualClock.control)})` : label;
+        return opt;
+      }));
+      Play.el.control.value = Play.controlChoice;
+    },
+
+    /** The selected time control as { initialMs, incrementMs }, or null for "No clock". */
+    parseControl(choice) {
+      if (choice === 'none') return null;
+      if (choice === 'clock') return { ...DualClock.control };
+      const [sec, inc] = choice.split('|').map(Number);
+      return { initialMs: sec * 1000, incrementMs: inc * 1000 };
+    },
+
+    /** Configure the timer from the current choice (resets both sides). */
+    applyControl() {
+      const control = Play.parseControl(Play.controlChoice);
+      Play.clockOn = control !== null;
+      if (control) Play.timer.configure(control.initialMs, control.incrementMs);
+      else Play.timer.reset();
+    },
+
+    /** The dropdown is only enabled before the first move or after the game ends. */
+    changeControl() {
+      Play.controlChoice = Play.el.control.value;
+      Store.set('playControl', Play.controlChoice);
+      // Before the first move, apply right away; after a finished game, it applies on New game.
+      if (Play.game.history().length === 0) Play.applyControl();
+      Play.render();
+      requestAnimationFrame(Play.sizeBoard); // bars change height when the clock is hidden/shown
+    },
+
+    /** Called after every move: start the clock on move one, otherwise switch turns. */
+    updateClockAfterMove() {
+      if (!Play.clockOn) return;
+      const t = Play.timer;
+      if (t.state === 'idle') t.start(Play.sideOf(Play.game.turn()));
+      else if (t.state === 'running') t.switchTurn(); // adds the mover's increment
+    },
+
+    // ---- game end ----
+
+    /** Result decided by the position itself, or null. Specific draws are checked before in_draw(). */
+    boardResult() {
+      const g = Play.game;
+      if (g.in_checkmate()) {
+        return { text: `Checkmate — ${Play.colorName(Play.other(g.turn()))} wins`, undoable: true };
+      }
+      if (g.in_stalemate()) return { text: 'Draw by stalemate', undoable: true };
+      if (g.in_threefold_repetition()) return { text: 'Draw by threefold repetition', undoable: true };
+      if (g.insufficient_material()) return { text: 'Draw by insufficient material', undoable: true };
+      // in_draw() also covers the cases above; what's left is the 50-move rule.
+      if (g.in_draw()) return { text: 'Draw by the 50-move rule', undoable: true };
+      return null;
+    },
+
+    /**
+     * Can `color` still deliver checkmate with its remaining material?
+     * Simplified FIDE rule: a lone king, or king plus a single bishop or
+     * knight, cannot. Used to turn a time loss into a draw.
+     */
+    canMate(color) {
+      let minors = 0;
+      for (const file of 'abcdefgh') {
+        for (let rank = 1; rank <= 8; rank++) {
+          const p = Play.game.get(file + rank);
+          if (!p || p.color !== color || p.type === 'k') continue;
+          if (p.type === 'n' || p.type === 'b') minors += 1;
+          else return true; // any pawn, rook or queen
+        }
+      }
+      return minors >= 2;
+    },
+
+    /** ChessTimer callback: a player's time ran out. */
+    handleFlag(side) {
+      const loser = side === 0 ? 'w' : 'b';
+      const winner = Play.other(loser);
+      Play.result = Play.canMate(winner)
+        ? { text: `${Play.colorName(winner)} wins on time`, undoable: false }
+        : { text: `Draw — ${Play.colorName(loser)} ran out of time, but ${Play.colorName(winner)} can't checkmate`, undoable: false };
+      if (Play.pendingPromotion) Play.cancelPromotion();
+      Play.selected = null;
+      Sound.flag();
+      Play.applyHighlights();
       Play.render();
     },
 
-    /** True once the game has ended and no more moves are allowed. */
-    isOver() { return Play.game.game_over(); },
+    /** The side to move resigns. */
+    resign() {
+      if (Play.isOver()) return;
+      const mover = Play.game.turn();
+      Play.result = { text: `${Play.colorName(mover)} resigns — ${Play.colorName(Play.other(mover))} wins`, undoable: false };
+      Play.timer.stop();
+      if (Play.pendingPromotion) Play.cancelPromotion();
+      Play.selected = null;
+      Sound.gameEnd();
+      Play.applyHighlights();
+      Play.render();
+    },
+
+    // ---- game controls ----
+
+    newGame() {
+      if (Play.pendingPromotion) Play.closePromotion();
+      Play.game.reset();
+      Play.result = null;
+      Play.selected = null;
+      if (Play.board) Play.board.position('start');
+      Play.applyControl();
+      Play.applyHighlights();
+      Play.render();
+    },
+
+    /** Undo is allowed during play and after a board result, but not after a flag or resignation. */
+    canUndo() {
+      return Play.game.history().length > 0 && (!Play.result || Play.result.undoable);
+    },
+
+    /**
+     * Take back the last move. The clock goes back to the player who is to
+     * move again; time already used is not refunded (simple pass-and-play takeback).
+     */
+    undo() {
+      if (!Play.canUndo()) return;
+      if (Play.pendingPromotion) Play.closePromotion();
+      Play.game.undo();
+      Play.result = null;
+      Play.selected = null;
+      Play.board.position(Play.game.fen());
+      if (Play.clockOn) {
+        const t = Play.timer;
+        if (Play.game.history().length === 0) {
+          t.reset(); // back to the start: clock waits for White's first move again
+        } else {
+          t.giveTurnTo(Play.sideOf(Play.game.turn()));
+          if (t.state === 'paused') t.resume(); // the game had ended on the board; play continues
+        }
+      }
+      Sound.move();
+      Play.applyHighlights();
+      Play.render();
+    },
+
+    /**
+     * Two-step confirmation without a modal: the first click turns the button
+     * red ("Tap to confirm"); a second click within 3 s runs the action.
+     */
+    confirmThen(btn, action) {
+      if (Play.disarmTimers.has(btn)) {
+        Play.disarm(btn);
+        action();
+        return;
+      }
+      btn.querySelector('.btn-label').textContent = 'Tap to confirm';
+      btn.classList.add('!bg-red-600', '!text-white');
+      Play.disarmTimers.set(btn, setTimeout(() => Play.disarm(btn), 3000));
+    },
+
+    disarm(btn) {
+      clearTimeout(Play.disarmTimers.get(btn));
+      Play.disarmTimers.delete(btn);
+      btn.classList.remove('!bg-red-600', '!text-white');
+      Play.renderControls(); // restores the normal label
+    },
 
     // ---- chessboard.js callbacks (drag to move) ----
 
@@ -938,11 +1223,20 @@
       return move;
     },
 
-    /** Everything that should happen after any move: sound, highlights, panel. */
+    /** Everything that should happen after any move: clock, game-end check, sound, panel. */
     afterMove(move) {
-      if (Play.game.in_check()) Sound.check();
-      else if (move.captured) Sound.capture();
-      else Sound.move();
+      Play.updateClockAfterMove();
+      // The mover may have run out of time just before completing the move;
+      // switchTurn() then flagged and handleFlag() already set the result.
+      if (!Play.result) {
+        Play.result = Play.boardResult();
+        if (Play.result) {
+          Play.timer.stop();
+          Sound.gameEnd();
+        } else if (Play.game.in_check()) Sound.check();
+        else if (move.captured) Sound.capture();
+        else Sound.move();
+      }
       Play.applyHighlights();
       Play.render();
     },
@@ -1038,14 +1332,141 @@
 
     colorName(c) { return c === 'w' ? 'White' : 'Black'; },
 
+    /** The player bar showing `color` (bars follow the board orientation). */
+    barFor(color) {
+      const bottom = Play.board ? Play.board.orientation().charAt(0) : 'w';
+      return color === bottom ? Play.el.barBottom : Play.el.barTop;
+    },
+
     render() {
+      Play.renderStatus();
+      Play.renderBars();
+      Play.renderClocks();
+      Play.renderMoves();
+      Play.renderControls();
+    },
+
+    renderStatus() {
       const g = Play.game;
       const turn = Play.colorName(g.turn());
-      let text = `${turn} to move`;
-      if (g.in_checkmate()) text = `Checkmate — ${Play.colorName(g.turn() === 'w' ? 'b' : 'w')} wins`;
-      else if (g.game_over()) text = 'Game over — draw';
-      else if (g.in_check()) text = `${turn} to move — check!`;
-      Play.el.status.textContent = text;
+      let main = `${turn} to move`;
+      let sub = '';
+      if (Play.result) {
+        main = Play.result.text;
+        sub = Play.result.undoable ? 'Start a new game, or undo to keep playing.' : 'Start a new game to play again.';
+      } else {
+        if (g.in_check()) main += ' — check!';
+        if (Play.clockOn && Play.timer.state === 'idle') sub = "The clock starts after White's first move.";
+      }
+      Play.el.status.textContent = main;
+      Play.el.substatus.textContent = sub;
+      Play.el.substatus.classList.toggle('hidden', !sub);
+      Play.el.statusBox.className = 'rounded-xl px-4 py-3 transition-colors ' +
+        (Play.result ? 'bg-emerald-500 text-slate-900' : g.in_check() ? 'bg-red-900/60 text-red-100' : 'bg-slate-800 text-slate-100');
+      Play.el.substatus.classList.toggle('text-slate-400', !Play.result);
+    },
+
+    /**
+     * Names, captured pieces and material lead for both bars. Captures come
+     * from the move history (so Undo just works); the "+N" lead is counted
+     * from the pieces on the board, so promotions are accounted for.
+     */
+    renderBars() {
+      const captured = { w: [], b: [] }; // pieces captured BY each colour
+      Play.game.history({ verbose: true }).forEach((m) => { if (m.captured) captured[m.color].push(m.captured); });
+
+      const material = { w: 0, b: 0 };
+      for (const file of 'abcdefgh') {
+        for (let rank = 1; rank <= 8; rank++) {
+          const p = Play.game.get(file + rank);
+          if (p) material[p.color] += Play.PIECE_VALUES[p.type];
+        }
+      }
+
+      ['w', 'b'].forEach((color) => {
+        const bar = Play.barFor(color);
+        const toMove = !Play.result && Play.game.turn() === color;
+        bar.classList.toggle('ring-2', toMove);
+        bar.classList.toggle('ring-emerald-500', toMove);
+        bar.querySelector('.bar-swatch').className = 'bar-swatch h-3 w-3 shrink-0 rounded-full ' +
+          (color === 'w' ? 'bg-slate-100' : 'bg-slate-950 ring-1 ring-slate-500');
+        bar.querySelector('.bar-name').textContent = Play.colorName(color);
+
+        // Highest-value captures first; images overlap slightly to save space.
+        const enemy = Play.other(color);
+        const sorted = captured[color].slice().sort((a, b) => Play.PIECE_VALUES[b] - Play.PIECE_VALUES[a]);
+        bar.querySelector('.bar-captured').replaceChildren(...sorted.map((type, i) => {
+          const img = document.createElement('img');
+          img.src = Play.PIECE_URL.replace('{piece}', enemy + type.toUpperCase());
+          img.alt = type;
+          img.className = 'h-5 w-5 shrink-0' + (i > 0 ? ' -ml-2' : '');
+          return img;
+        }));
+
+        const lead = material[color] - material[enemy];
+        bar.querySelector('.bar-diff').textContent = lead > 0 ? `+${lead}` : '';
+      });
+    },
+
+    /** Clock faces only; called by the timer about 20 times a second. */
+    renderClocks() {
+      const t = Play.timer;
+      if (!t || !Play.el.barTop) return; // the ChessTimer constructor fires onUpdate before it's assigned
+      ['w', 'b'].forEach((color) => {
+        const clock = Play.barFor(color).querySelector('.bar-clock');
+        clock.classList.toggle('hidden', !Play.clockOn);
+        if (!Play.clockOn) return;
+        const side = Play.sideOf(color);
+        const ms = t.timeOf(side);
+        let style = 'bg-slate-700 text-slate-300';
+        if (t.state === 'flagged' && t.flagged === side) style = 'bg-red-600 text-white';
+        else if (t.state === 'running' && t.active === side) style = ms < 10000 ? 'bg-amber-400 text-slate-900' : 'bg-emerald-500 text-slate-900';
+        clock.className = 'bar-clock tabular shrink-0 rounded-lg px-2.5 py-1 text-lg font-bold leading-none ' + style;
+        clock.textContent = formatTime(ms);
+      });
+    },
+
+    /** Move list in SAN, one row per full move; the latest move is highlighted. */
+    renderMoves() {
+      const history = Play.game.history();
+      const rows = [];
+      for (let i = 0; i < history.length; i += 2) {
+        const li = document.createElement('li');
+        li.className = 'grid grid-cols-[2.5rem_1fr_1fr] items-center gap-1 rounded px-2 py-0.5 odd:bg-slate-900/40';
+        const num = document.createElement('span');
+        num.className = 'text-slate-500';
+        num.textContent = `${i / 2 + 1}.`;
+        li.appendChild(num);
+        [i, i + 1].forEach((idx) => {
+          const cell = document.createElement('span');
+          cell.className = 'rounded px-1.5' + (idx === history.length - 1 ? ' bg-emerald-500/25 text-emerald-200' : '');
+          cell.textContent = history[idx] || '';
+          li.appendChild(cell);
+        });
+        rows.push(li);
+      }
+      if (rows.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'px-2 py-1 text-slate-500';
+        empty.textContent = 'No moves yet.';
+        rows.push(empty);
+      }
+      Play.el.moves.replaceChildren(...rows);
+      Play.el.moves.scrollTop = Play.el.moves.scrollHeight;
+      Play.el.moveCount.textContent = history.length ? `Move ${Math.ceil(history.length / 2)}` : '';
+    },
+
+    renderControls() {
+      const el = Play.el;
+      el.undo.disabled = !Play.canUndo();
+      el.resign.disabled = Play.isOver();
+      el.control.disabled = Play.inProgress();
+      el.control.value = Play.controlChoice;
+      // Don't overwrite a button that is waiting for its confirmation tap.
+      if (!Play.disarmTimers.has(el.resign)) {
+        el.resign.querySelector('.btn-label').textContent = Play.isOver() ? 'Resign' : `Resign (${Play.colorName(Play.game.turn())})`;
+      }
+      if (!Play.disarmTimers.has(el.newGame)) el.newGame.querySelector('.btn-label').textContent = 'New game';
     },
   };
 
