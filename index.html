@@ -18,8 +18,6 @@
   <style>
     /* Small amount of custom CSS for things Tailwind utilities can't express cleanly. */
     html, body { background-color: #0f172a; /* slate-900 */ }
-    /* Stop double-tap zoom and text selection on the big tap targets. */
-    .no-select { -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
     /* Tabular digits keep the clock from jittering as numbers change. */
     .tabular { font-variant-numeric: tabular-nums; }
 
@@ -27,6 +25,12 @@
     /* No border on the board itself (it would widen it past its container); the wrapper draws a ring. */
     #play-board .board-b72b1 { border: 0; }
     #view-play { scrollbar-gutter: stable; } /* stable width, so sizing the board can't toggle a scrollbar */
+    /* Side panel beside the board on wide screens AND on landscape phones/tablets, where stacking
+       would push the board off-screen. Keep this query in sync with Play.SIDE_BY_SIDE. */
+    @media (min-width: 1024px), (orientation: landscape) and (min-width: 640px) {
+      #view-play .play-layout { flex-direction: row; align-items: flex-start; justify-content: center; }
+      #view-play .play-aside  { width: 20rem; flex-shrink: 0; }
+    }
     #play-board .white-1e1d7 { background-color: #dfe5ec; color: #6b7f95; }
     #play-board .black-3c85d { background-color: #6b7f95; color: #dfe5ec; }
     #play-board .square-55d63 { position: relative; }
@@ -68,9 +72,9 @@
         <span class="hidden sm:inline">Chess Companion Hub</span>
       </div>
       <nav class="flex gap-1 rounded-xl bg-slate-800 p-1" role="tablist" aria-label="Sections">
-        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="clock">Clock</button>
-        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="play">Play</button>
-        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="facts">Facts</button>
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="clock" aria-controls="view-clock">Clock</button>
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="play" aria-controls="view-play">Play</button>
+        <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="facts" aria-controls="view-facts">Facts</button>
       </nav>
       <button id="sound-toggle" class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-700" aria-pressed="true" title="Toggle sound">
         <span id="sound-icon" aria-hidden="true">&#128266;</span><span class="sr-only">Sound</span>
@@ -156,7 +160,7 @@
            TAB 2: LOCAL MULTIPLAYER (Pass-and-Play)
            ================================================================ -->
       <section id="view-play" class="tab-view hidden h-full overflow-y-auto" role="tabpanel">
-        <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 p-3 sm:p-4 lg:flex-row lg:items-start lg:justify-center">
+        <div class="play-layout mx-auto flex max-w-6xl flex-col items-center gap-4 p-3 sm:p-4">
 
           <!-- Board column (its width is set by Play.sizeBoard) -->
           <div id="play-board-col" class="flex max-w-full flex-col gap-2">
@@ -197,7 +201,7 @@
           </div>
 
           <!-- Side panel -->
-          <aside class="flex w-full max-w-xl flex-col gap-3 lg:w-80">
+          <aside class="play-aside flex w-full max-w-xl flex-col gap-3">
             <div id="play-status-box" class="rounded-xl px-4 py-3 transition-colors" aria-live="polite">
               <p id="play-status" class="font-semibold"></p>
               <p id="play-substatus" class="mt-0.5 text-xs"></p>
@@ -448,8 +452,9 @@
       this.onUpdate();
     }
 
-    /** Stop the clock without flagging (e.g. game ended on the board). */
+    /** Stop the clock without flagging (e.g. game ended on the board). No-op before the start. */
     stop() {
+      if (this.state === 'idle') return;
       this._settle();
       this._stopLoop();
       if (this.state !== 'flagged') this.state = 'paused';
@@ -585,8 +590,8 @@
       });
 
       // pointerdown (not click) so a tap registers instantly, with no click delay.
-      el.top.addEventListener('pointerdown', (e) => { e.preventDefault(); DualClock.press(DualClock.colorAt('top')); });
-      el.bottom.addEventListener('pointerdown', (e) => { e.preventDefault(); DualClock.press(DualClock.colorAt('bottom')); });
+      el.top.addEventListener('pointerdown', (e) => DualClock.onSidePointer(e, 'top'));
+      el.bottom.addEventListener('pointerdown', (e) => DualClock.onSidePointer(e, 'bottom'));
 
       el.pause.addEventListener('click', DualClock.togglePause);
       el.reset.addEventListener('click', DualClock.reset);
@@ -631,6 +636,13 @@
 
     settingsOpen() { return !DualClock.el.settings.classList.contains('hidden'); },
 
+    /** Primary-button presses only, so a right-click (context menu) can't end a move. */
+    onSidePointer(e, pos) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      DualClock.press(DualClock.colorAt(pos));
+    },
+
     /** A player tapped their half of the screen. */
     press(color) {
       const t = DualClock.timer;
@@ -659,6 +671,11 @@
         if (e.key === 'Escape') DualClock.closeSettings();
         return;
       }
+      // Leave keys alone when a keyboard user has focused another control (tab buttons,
+      // Reset, sound toggle...), so Enter/Space still activate it. The clock halves are fine.
+      const focused = e.target.closest && e.target.closest('button, input, select, textarea, a');
+      if (focused && !focused.classList.contains('clock-side')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.code === 'Space' || e.key === 'Enter') {
         e.preventDefault();
         const t = DualClock.timer;
@@ -838,6 +855,8 @@
     PIECE_URL: 'https://cdn.jsdelivr.net/gh/oakmac/chessboardjs@v1.0.0/website/img/chesspieces/wikipedia/{piece}.png',
     PROMOTION_PIECES: [['q', 'Queen'], ['r', 'Rook'], ['b', 'Bishop'], ['n', 'Knight']],
     PIECE_VALUES: { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 },
+    // When the side panel sits beside the board (must match the .play-layout CSS media query).
+    SIDE_BY_SIDE: '(min-width: 1024px), (orientation: landscape) and (min-width: 640px)',
     // Clock choices: 'none', 'seconds|increment', or 'clock' (copy Tab 1's time control).
     CONTROL_OPTIONS: [
       ['none', 'No clock'],
@@ -938,17 +957,18 @@
 
     /**
      * Fit the board (plus anything above/below it) inside the visible area.
-     * Wide screens (lg) put the side panel beside the board, so subtract its
-     * width; narrower screens stack the panel underneath, reached by scrolling.
+     * In the side-by-side layout, subtract the panel's width; otherwise the
+     * panel is stacked underneath and reached by scrolling.
      */
     sizeBoard() {
       if (!Play.board) return;
-      const wide = window.matchMedia('(min-width: 1024px)').matches;
+      const sideBySide = window.matchMedia(Play.SIDE_BY_SIDE).matches;
       const padding = window.matchMedia('(min-width: 640px)').matches ? 32 : 24; // p-4 / p-3
-      const availWidth = Play.el.view.clientWidth - padding - (wide ? 320 + 16 : 0);
+      const availWidth = Play.el.view.clientWidth - padding - (sideBySide ? 320 + 16 : 0);
       const availHeight = Play.el.view.clientHeight - padding - Play.reservedBarHeight();
-      // Multiple of 8 so every square is a whole number of pixels.
-      const size = Math.floor(Math.max(240, Math.min(availWidth, availHeight, 720)) / 8) * 8;
+      // Multiple of 8 so every square is a whole number of pixels. The 160px floor only
+      // matters on very short landscape phones, where fitting on screen beats bigger squares.
+      const size = Math.floor(Math.max(160, Math.min(availWidth, availHeight, 720)) / 8) * 8;
       // chessboard.js sizes squares from (container width - 1), so add that pixel back.
       Play.el.col.style.width = (size + 1) + 'px';
       Play.el.wrap.style.width = (size + 1) + 'px';
@@ -1185,6 +1205,7 @@
     },
 
     onPointerDown(e) {
+      if (e.button !== 0) { Play.tap = null; return; } // ignore right/middle clicks
       const square = Play.squareAt(e.clientX, e.clientY);
       Play.tap = square ? { square, selectedBefore: Play.selected } : null;
     },
