@@ -41,6 +41,9 @@
         <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="play">Play</button>
         <button class="tab-btn rounded-lg px-3 py-1.5 text-sm font-medium transition" role="tab" data-tab="facts">Facts</button>
       </nav>
+      <button id="sound-toggle" class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-slate-300 transition hover:bg-slate-700" aria-pressed="true" title="Toggle sound">
+        <span id="sound-icon" aria-hidden="true">&#128266;</span><span class="sr-only">Sound</span>
+      </button>
     </header>
 
     <main class="relative min-h-0 flex-1">
@@ -71,6 +74,220 @@
 
   <script>
   'use strict';
+
+  /* ==================================================================
+     SHARED HELPERS
+     Used by both the Dual Clock (Tab 1) and the Pass-and-Play mini
+     clock (Tab 2): safe storage, time formatting, sounds, and a
+     two-sided countdown timer.
+     ================================================================== */
+
+  /** localStorage wrapper that never throws (private windows, blocked storage). */
+  const Store = {
+    get(key, fallback) {
+      try {
+        const raw = localStorage.getItem('cch:' + key);
+        return raw === null ? fallback : JSON.parse(raw);
+      } catch (e) { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem('cch:' + key, JSON.stringify(value)); } catch (e) { /* ignore */ }
+    },
+  };
+
+  /**
+   * Format milliseconds for a chess clock.
+   * - 10 s or more: "m:ss" (or "h:mm:ss" past an hour), seconds floored.
+   * - under 10 s:   "s.t" with tenths, so the final seconds are readable.
+   */
+  function formatTime(ms) {
+    ms = Math.max(0, ms);
+    if (ms < 10000) return (Math.floor(ms / 100) / 10).toFixed(1);
+    const total = Math.floor(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = String(total % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+  }
+
+  /** Human label for a time control, e.g. "5 | 0" or "1:30 | 2". */
+  function controlLabel({ initialMs, incrementMs }) {
+    const total = Math.round(initialMs / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    const base = s === 0 ? String(m) : `${m}:${String(s).padStart(2, '0')}`;
+    return `${base} | ${Math.round(incrementMs / 1000)}`;
+  }
+
+  /**
+   * Sound effects synthesised with the Web Audio API (no audio files).
+   * Browsers only allow audio after a user gesture, so the AudioContext is
+   * created lazily on the first pointer/key press (see unlock()).
+   */
+  const Sound = {
+    ctx: null,
+    enabled: Store.get('sound', true),
+
+    unlock() {
+      if (Sound.ctx) {
+        if (Sound.ctx.state === 'suspended') Sound.ctx.resume();
+        return;
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) Sound.ctx = new AC();
+    },
+
+    /** Play one short tone. `delay` (seconds) lets us sequence simple melodies. */
+    tone(freq, duration, { type = 'sine', gain = 0.2, delay = 0 } = {}) {
+      if (!Sound.enabled || !Sound.ctx) return;
+      const t0 = Sound.ctx.currentTime + delay;
+      const osc = Sound.ctx.createOscillator();
+      const amp = Sound.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      // Quick attack + exponential decay avoids clicks at start/end of the tone.
+      amp.gain.setValueAtTime(0.0001, t0);
+      amp.gain.exponentialRampToValueAtTime(gain, t0 + 0.005);
+      amp.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+      osc.connect(amp).connect(Sound.ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + duration + 0.02);
+    },
+
+    tap()     { Sound.tone(880, 0.06, { type: 'square', gain: 0.08 }); },
+    move()    { Sound.tone(520, 0.07, { type: 'triangle', gain: 0.25 }); },
+    capture() { Sound.tone(300, 0.10, { type: 'triangle', gain: 0.3 }); Sound.tone(180, 0.12, { type: 'triangle', gain: 0.25, delay: 0.04 }); },
+    check()   { Sound.tone(740, 0.09, { type: 'sawtooth', gain: 0.08 }); Sound.tone(988, 0.12, { type: 'sawtooth', gain: 0.08, delay: 0.09 }); },
+    flag()    { [0, 0.18, 0.36].forEach((d) => Sound.tone(220, 0.16, { type: 'square', gain: 0.12, delay: d })); },
+    gameEnd() { [523, 659, 784].forEach((f, i) => Sound.tone(f, 0.18, { gain: 0.18, delay: i * 0.12 })); },
+
+    setEnabled(on) {
+      Sound.enabled = on;
+      Store.set('sound', on);
+      const btn = document.getElementById('sound-toggle');
+      btn.setAttribute('aria-pressed', String(on));
+      document.getElementById('sound-icon').innerHTML = on ? '&#128266;' : '&#128263;';
+    },
+
+    init() {
+      // The first interaction anywhere unlocks audio for the rest of the session.
+      ['pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, Sound.unlock, { capture: true }));
+      document.getElementById('sound-toggle').addEventListener('click', () => Sound.setEnabled(!Sound.enabled));
+      Sound.setEnabled(Sound.enabled);
+    },
+  };
+
+  /**
+   * Two-sided countdown timer (side 0 and side 1).
+   *
+   * Accuracy: remaining time is reduced by real elapsed time measured with
+   * performance.now(), so a late or throttled interval tick never loses time.
+   * The interval only drives re-rendering and flag detection.
+   *
+   * States: 'idle' (not started), 'running', 'paused', 'flagged'.
+   */
+  class ChessTimer {
+    constructor({ initialMs, incrementMs, onUpdate = () => {}, onFlag = () => {} }) {
+      this.onUpdate = onUpdate;
+      this.onFlag = onFlag;
+      this.interval = null;
+      this.configure(initialMs, incrementMs);
+    }
+
+    /** Set a new time control and reset both sides. */
+    configure(initialMs, incrementMs) {
+      this.initialMs = initialMs;
+      this.incrementMs = incrementMs;
+      this.reset();
+    }
+
+    reset() {
+      this._stopLoop();
+      this.remaining = [this.initialMs, this.initialMs];
+      this.moves = [0, 0];       // completed moves (clock presses) per side
+      this.active = null;        // side whose clock is (or was) counting down
+      this.flagged = null;       // side that ran out of time
+      this.state = 'idle';
+      this.onUpdate();
+    }
+
+    /** Begin counting down for `side` (first move of a game). */
+    start(side) {
+      if (this.state !== 'idle') return;
+      this.active = side;
+      this._run();
+    }
+
+    /**
+     * The active side completed a move: add its increment and hand the
+     * clock to the opponent. Returns false if the press was ignored.
+     */
+    switchTurn() {
+      if (this.state !== 'running') return false;
+      this._settle();
+      if (this.state === 'flagged') return false; // ran out just before pressing
+      this.remaining[this.active] += this.incrementMs;
+      this.moves[this.active] += 1;
+      this.active = 1 - this.active;
+      this.onUpdate();
+      return true;
+    }
+
+    pause() {
+      if (this.state !== 'running') return;
+      this._settle();
+      if (this.state === 'flagged') return;
+      this._stopLoop();
+      this.state = 'paused';
+      this.onUpdate();
+    }
+
+    resume() {
+      if (this.state !== 'paused') return;
+      this._run();
+    }
+
+    /** Stop the clock without flagging (e.g. game ended on the board). */
+    stop() {
+      this._settle();
+      this._stopLoop();
+      if (this.state !== 'flagged') this.state = 'paused';
+      this.onUpdate();
+    }
+
+    /** Remaining ms for a side (already settled on every tick). */
+    timeOf(side) { return this.remaining[side]; }
+
+    // ---- internals ----
+
+    _run() {
+      this.state = 'running';
+      this.lastStamp = performance.now();
+      this._stopLoop();
+      this.interval = setInterval(() => { this._settle(); this.onUpdate(); }, 50);
+      this.onUpdate();
+    }
+
+    /** Charge elapsed real time to the active side and detect a flag. */
+    _settle() {
+      if (this.state !== 'running') return;
+      const now = performance.now();
+      this.remaining[this.active] -= now - this.lastStamp;
+      this.lastStamp = now;
+      if (this.remaining[this.active] <= 0) {
+        this.remaining[this.active] = 0;
+        this.flagged = this.active;
+        this.state = 'flagged';
+        this._stopLoop();
+        this.onFlag(this.active);
+      }
+    }
+
+    _stopLoop() {
+      if (this.interval) clearInterval(this.interval);
+      this.interval = null;
+    }
+  }
 
   /* ==================================================================
      TABS
@@ -118,6 +335,7 @@
      BOOT
      ================================================================== */
   document.addEventListener('DOMContentLoaded', () => {
+    Sound.init();
     Tabs.init();
   });
   </script>
