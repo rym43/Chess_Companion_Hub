@@ -232,7 +232,30 @@
            TAB 3: FACTS ENGINE
            ================================================================ -->
       <section id="view-facts" class="tab-view hidden h-full overflow-y-auto" role="tabpanel">
-        <p class="p-6 text-slate-400">Facts engine — coming in step 6.</p>
+        <div class="mx-auto max-w-5xl p-4 sm:p-6">
+          <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 class="text-2xl font-bold">Chess Facts &amp; Trivia</h2>
+              <p class="text-sm text-slate-400">History, records and curiosities from 1,500 years of chess.</p>
+            </div>
+            <button id="facts-random" class="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 font-semibold text-slate-900 transition hover:bg-emerald-400 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300">
+              <span aria-hidden="true">&#127922;</span>Random fact
+            </button>
+          </div>
+
+          <!-- Featured fact (filled by Facts.feature) -->
+          <article id="facts-featured" class="mb-6 rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-slate-800 to-slate-900 p-5 shadow-lg shadow-emerald-950/40 transition duration-200 sm:p-7" aria-live="polite">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <span id="facts-featured-tag"></span>
+              <span id="facts-featured-count" class="text-xs text-slate-500"></span>
+            </div>
+            <h3 id="facts-featured-title" class="mb-2 text-xl font-bold text-emerald-400 sm:text-2xl"></h3>
+            <p id="facts-featured-text" class="leading-relaxed text-slate-200 sm:text-lg"></p>
+          </article>
+
+          <div id="facts-filters" class="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter facts by category"></div>
+          <div id="facts-grid" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+        </div>
       </section>
 
     </main>
@@ -1471,12 +1494,160 @@
   };
 
   /* ==================================================================
+     TAB 3: FACTS ENGINE
+     A curated list of facts shown as a filterable card gallery, plus a
+     featured card that "Random fact" (or clicking any card) fills.
+     Random never repeats the fact currently featured.
+     ================================================================== */
+  const Facts = {
+    CATEGORIES: {
+      History: { icon: '♜', badge: 'bg-sky-500/15 text-sky-300 ring-sky-500/30' },
+      Records: { icon: '♛', badge: 'bg-amber-500/15 text-amber-300 ring-amber-500/30' },
+      Trivia:  { icon: '♞', badge: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' },
+    },
+
+    LIST: [
+      { cat: 'History', title: 'Born in India', text: 'Chess traces back to chaturanga, played in India around the 6th century. Its four "divisions of the army" (infantry, cavalry, elephants and chariots) became the pawn, knight, bishop and rook.' },
+      { cat: 'History', title: 'The queen used to be weak', text: 'In medieval chess the queen (then the fers, or advisor) could move only one square diagonally. She gained her sweeping modern powers in late-15th-century Europe, which made the game much faster.' },
+      { cat: 'History', title: 'The first world champion', text: 'The first official World Chess Championship was played in 1886 in the United States. Wilhelm Steinitz beat Johannes Zukertort and became the first undisputed world champion.' },
+      { cat: 'History', title: 'The Mechanical Turk', text: 'The Turk, built in 1770, toured Europe as a chess-playing machine and played Napoleon and Benjamin Franklin. It was a hoax: a strong human player hid inside the cabinet.' },
+      { cat: 'History', title: 'The Immortal Game', text: 'In London in 1851, Adolf Anderssen beat Lionel Kieseritzky after giving up a bishop, both rooks and his queen, then checkmating with his three remaining minor pieces.' },
+      { cat: 'History', title: 'Machine beats champion', text: "In 1997 IBM's Deep Blue beat world champion Garry Kasparov 3½–2½ in a six-game match, the first time a computer won a match against a reigning champion." },
+      { cat: 'History', title: 'FIDE and the Olympiad', text: 'FIDE, the international chess federation, was founded in Paris in 1924. It organised the first official Chess Olympiad in London in 1927.' },
+      { cat: 'Records', title: 'Highest rating ever', text: "Magnus Carlsen reached a classical rating of 2882 in May 2014, the highest in the history of FIDE's rating list." },
+      { cat: 'Records', title: 'The youngest grandmaster', text: 'Abhimanyu Mishra became the youngest grandmaster in history in 2021, aged 12 years, 4 months and 25 days.' },
+      { cat: 'Records', title: 'Judit Polgár', text: "Judit Polgár earned the grandmaster title in 1991 at 15, breaking Bobby Fischer's record as the youngest at the time. She is widely regarded as the strongest female player ever and reached the overall world top 10." },
+      { cat: 'Records', title: "Fischer's 20-game streak", text: 'On his way to the 1972 world championship, Bobby Fischer won 20 consecutive games against elite grandmasters, including two 6–0 Candidates match wins over Mark Taimanov and Bent Larsen.' },
+      { cat: 'Records', title: 'The longest tournament game', text: 'Ivan Nikolić and Goran Arsović played 269 moves in Belgrade in 1989. The game lasted over 20 hours and ended in a draw.' },
+      { cat: 'Records', title: 'Hundreds of boards at once', text: 'In 2011 Iranian grandmaster Ehsan Ghaem Maghami played 604 simultaneous games, winning 580 of them, which set a Guinness world record.' },
+      { cat: 'Records', title: 'The longest possible game', text: 'With the 50-move rule in force, the longest possible chess game is estimated at 5,949 moves.' },
+      { cat: 'Trivia', title: 'More games than atoms', text: "Claude Shannon estimated about 10^120 possible chess games (the \"Shannon number\"). That's far more than the roughly 10^80 atoms in the observable universe." },
+      { cat: 'Trivia', title: 'It explodes quickly', text: 'After one move each there are 400 possible positions. After two moves each there are 197,281 possible games.' },
+      { cat: 'Trivia', title: 'Where "checkmate" comes from', text: 'The word comes from the Persian shāh māt, roughly "the king is helpless." "Rook" comes from the Persian rukh, meaning chariot.' },
+      { cat: 'Trivia', title: "Fool's Mate", text: 'The fastest possible checkmate takes two moves: 1. f3 e5 2. g4 Qh4#. Try it on the Play tab!' },
+      { cat: 'Trivia', title: "The knight's tour", text: 'A knight can visit every one of the 64 squares exactly once. Mathematicians, including Leonhard Euler, have studied this puzzle for centuries.' },
+      { cat: 'Trivia', title: 'Fischer invented the increment', text: 'Bobby Fischer patented a digital chess clock in 1988 that adds time after every move, the "increment" used by most modern time controls (and by the Clock tab).' },
+      { cat: 'Trivia', title: 'En passant is a late addition', text: 'The en passant capture came in around the 15th century, when pawns gained the option of moving two squares on their first move, so they could not skip past an enemy pawn.' },
+    ],
+
+    filter: 'All',
+    current: -1,  // index into LIST of the featured fact
+    el: {},
+
+    init() {
+      const $ = (id) => document.getElementById(id);
+      Facts.el = {
+        random: $('facts-random'),
+        featured: $('facts-featured'),
+        tag: $('facts-featured-tag'),
+        count: $('facts-featured-count'),
+        title: $('facts-featured-title'),
+        text: $('facts-featured-text'),
+        filters: $('facts-filters'),
+        grid: $('facts-grid'),
+      };
+      Facts.el.random.addEventListener('click', Facts.random);
+      Facts.renderFilters();
+      Facts.renderGrid();
+      Facts.feature(Math.floor(Math.random() * Facts.LIST.length), false);
+    },
+
+    /** Indices of the facts in the active category. */
+    visible() {
+      return Facts.LIST.map((f, i) => i).filter((i) => Facts.filter === 'All' || Facts.LIST[i].cat === Facts.filter);
+    },
+
+    /** Feature a random fact from the active category, never the one already shown. */
+    random() {
+      const pool = Facts.visible().filter((i) => i !== Facts.current);
+      if (pool.length === 0) return;
+      Facts.feature(pool[Math.floor(Math.random() * pool.length)], true);
+    },
+
+    tagEl(cat) {
+      const span = document.createElement('span');
+      span.className = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ' + Facts.CATEGORIES[cat].badge;
+      span.textContent = `${Facts.CATEGORIES[cat].icon} ${cat}`;
+      return span;
+    },
+
+    /** Show fact `index` in the featured card, with a short fade unless reduced motion is preferred. */
+    feature(index, animate) {
+      Facts.current = index;
+      const fact = Facts.LIST[index];
+      const fill = () => {
+        Facts.el.tag.replaceChildren(Facts.tagEl(fact.cat));
+        Facts.el.count.textContent = `Fact ${index + 1} of ${Facts.LIST.length}`;
+        Facts.el.title.textContent = fact.title;
+        Facts.el.text.textContent = fact.text;
+        Facts.el.featured.classList.remove('opacity-0', 'translate-y-2');
+        Facts.markCurrent();
+      };
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!animate || reduced) { fill(); return; }
+      Facts.el.featured.classList.add('opacity-0', 'translate-y-2');
+      setTimeout(fill, 180);
+    },
+
+    renderFilters() {
+      Facts.el.filters.replaceChildren(...['All', ...Object.keys(Facts.CATEGORIES)].map((name) => {
+        const btn = document.createElement('button');
+        const active = Facts.filter === name;
+        btn.className = 'rounded-full px-3.5 py-1.5 text-sm font-medium transition ' +
+          (active ? 'bg-emerald-500 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700');
+        btn.setAttribute('aria-pressed', String(active));
+        const count = name === 'All' ? Facts.LIST.length : Facts.LIST.filter((f) => f.cat === name).length;
+        btn.textContent = `${name} (${count})`;
+        btn.addEventListener('click', () => {
+          Facts.filter = name;
+          Facts.renderFilters();
+          Facts.renderGrid();
+        });
+        return btn;
+      }));
+    },
+
+    renderGrid() {
+      Facts.el.grid.replaceChildren(...Facts.visible().map((i) => {
+        const fact = Facts.LIST[i];
+        const card = document.createElement('button');
+        card.className = 'flex flex-col items-start gap-2 rounded-2xl border bg-slate-800/70 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-500/60 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400';
+        card.dataset.index = i;
+        card.setAttribute('aria-label', `Feature: ${fact.title}`);
+        const title = document.createElement('h4');
+        title.className = 'font-semibold text-slate-100';
+        title.textContent = fact.title;
+        const text = document.createElement('p');
+        text.className = 'text-sm leading-relaxed text-slate-400';
+        text.textContent = fact.text;
+        card.append(Facts.tagEl(fact.cat), title, text);
+        card.addEventListener('click', () => {
+          Facts.feature(i, true);
+          Facts.el.featured.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+        return card;
+      }));
+      Facts.markCurrent();
+    },
+
+    /** Outline the card of the featured fact (toggling classes keeps keyboard focus in place). */
+    markCurrent() {
+      Facts.el.grid.querySelectorAll('[data-index]').forEach((card) => {
+        const isCurrent = Number(card.dataset.index) === Facts.current;
+        card.classList.toggle('border-emerald-500', isCurrent);
+        card.classList.toggle('border-slate-700', !isCurrent);
+      });
+    },
+  };
+
+  /* ==================================================================
      BOOT
      ================================================================== */
   document.addEventListener('DOMContentLoaded', () => {
     Sound.init();
     DualClock.init();
     Play.init();
+    Facts.init();
     Tabs.init();
   });
   </script>
