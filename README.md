@@ -2,7 +2,7 @@
 
 An all-in-one chess companion for playing in person: a two-player chess clock, a pass-and-play board, and a gallery of chess facts. It's a single HTML file with a dark design, and it runs straight in your browser with no install, build step or server.
 
-**Live demo:** https://rym43.github.io/Chess_Companion_Hub/ *(coming soon, once GitHub Pages is enabled)*
+**Live demo:** https://rym43.github.io/Chess_Companion_Hub/
 
 ## Features
 
