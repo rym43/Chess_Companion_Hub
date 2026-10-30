@@ -22,6 +22,26 @@
     .no-select { -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
     /* Tabular digits keep the clock from jittering as numbers change. */
     .tabular { font-variant-numeric: tabular-nums; }
+
+    /* ---- chessboard.js theme overrides (class names come from chessboard.js) ---- */
+    /* No border on the board itself (it would widen it past its container); the wrapper draws a ring. */
+    #play-board .board-b72b1 { border: 0; }
+    #view-play { scrollbar-gutter: stable; } /* stable width, so sizing the board can't toggle a scrollbar */
+    #play-board .white-1e1d7 { background-color: #dfe5ec; color: #6b7f95; }
+    #play-board .black-3c85d { background-color: #6b7f95; color: #dfe5ec; }
+    #play-board .square-55d63 { position: relative; }
+    /* Highlights are drawn with inset shadows / gradients so the square colour still shows through. */
+    #play-board .sq-last     { box-shadow: inset 0 0 0 999px rgba(16, 185, 129, 0.32); }   /* emerald-500 */
+    #play-board .sq-selected { box-shadow: inset 0 0 0 999px rgba(16, 185, 129, 0.55); }
+    #play-board .sq-check    { background-image: radial-gradient(circle, rgba(239, 68, 68, 0.95) 0%, rgba(239, 68, 68, 0.55) 45%, transparent 75%); }
+    #play-board .sq-target::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(circle, rgba(15, 23, 42, 0.35) 18%, transparent 20%);
+    }
+    #play-board .sq-capture::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(circle, transparent 62%, rgba(15, 23, 42, 0.4) 64%);
+    }
   </style>
 
   <!-- Reusable component classes, built from Tailwind utilities. -->
@@ -135,7 +155,33 @@
            TAB 2: LOCAL MULTIPLAYER (Pass-and-Play)
            ================================================================ -->
       <section id="view-play" class="tab-view hidden h-full overflow-y-auto" role="tabpanel">
-        <p class="p-6 text-slate-400">Pass-and-play board — coming in steps 4–5.</p>
+        <div class="mx-auto flex max-w-6xl flex-col items-center gap-4 p-3 sm:p-4 lg:flex-row lg:items-start lg:justify-center">
+
+          <!-- Board column (its width is set by Play.sizeBoard) -->
+          <div id="play-board-col" class="flex max-w-full flex-col gap-2">
+            <div id="play-board-wrap" class="relative ring-2 ring-slate-700" style="touch-action: none">
+              <div id="play-board"></div>
+
+              <!-- Pawn promotion picker, shown over the board -->
+              <div id="promo-picker" class="absolute inset-0 z-10 hidden items-center justify-center bg-slate-950/70">
+                <div class="rounded-2xl border border-slate-700 bg-slate-800 p-4 text-center shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="promo-title">
+                  <p id="promo-title" class="mb-3 text-sm font-semibold text-slate-300">Promote pawn to</p>
+                  <div id="promo-choices" class="flex gap-2"></div>
+                  <button id="promo-cancel" class="mt-3 rounded-lg px-3 py-1 text-xs text-slate-400 hover:bg-slate-700 hover:text-slate-200">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side panel -->
+          <aside class="flex w-full max-w-xl flex-col gap-3 lg:w-80">
+            <div id="play-status" class="rounded-xl bg-slate-800 px-4 py-3 font-semibold" aria-live="polite"></div>
+            <div class="flex flex-wrap gap-2">
+              <button id="play-flip" class="ctrl-btn"><span aria-hidden="true">&#8645;</span><span>Flip board</span></button>
+            </div>
+            <p class="text-xs text-slate-500">Drag a piece, or tap it and then tap a highlighted square.</p>
+          </aside>
+        </div>
       </section>
 
       <!-- ================================================================
@@ -693,11 +739,323 @@
   };
 
   /* ==================================================================
+     TAB 2: LOCAL MULTIPLAYER (Pass-and-Play)
+     chess.js owns the game state and validates every move; chessboard.js
+     only draws the board and reports drags. After each move the board is
+     re-synced from chess.js's FEN, which also takes care of castling,
+     en passant and promotion.
+
+     Two ways to move:
+     - Drag: chessboard.js calls onDrop(source, target).
+     - Tap: tap one of your pieces, then a destination square. Taps are
+       detected with pointer events on the board wrapper (pointerdown and
+       pointerup on the same square), which work for mouse and touch.
+     ================================================================== */
+  const Play = {
+    PIECE_URL: 'https://cdn.jsdelivr.net/gh/oakmac/chessboardjs@v1.0.0/website/img/chesspieces/wikipedia/{piece}.png',
+    PROMOTION_PIECES: [['q', 'Queen'], ['r', 'Rook'], ['b', 'Bishop'], ['n', 'Knight']],
+
+    game: null,
+    board: null,             // created lazily: chessboard.js needs a visible container to measure
+    selected: null,          // square of the tapped/dragged piece, e.g. 'e2'
+    pendingPromotion: null,  // { from, to, viaDrag } while the picker is open
+    tap: null,               // { square, selectedBefore } between pointerdown and pointerup
+    el: {},
+
+    init() {
+      const $ = (id) => document.getElementById(id);
+      Play.el = {
+        view: $('view-play'),
+        col: $('play-board-col'),
+        wrap: $('play-board-wrap'),
+        status: $('play-status'),
+        flip: $('play-flip'),
+        promo: $('promo-picker'),
+        promoChoices: $('promo-choices'),
+        promoCancel: $('promo-cancel'),
+      };
+      Play.game = new Chess();
+
+      Tabs.onShow.push((name) => { if (name === 'play') Play.show(); });
+      window.addEventListener('resize', () => { if (Play.isVisible()) Play.sizeBoard(); });
+
+      Play.el.flip.addEventListener('click', Play.flip);
+      Play.el.promoCancel.addEventListener('click', Play.cancelPromotion);
+      // Capture phase so we record the selection before chessboard.js's own mousedown handler runs.
+      Play.el.wrap.addEventListener('pointerdown', Play.onPointerDown, { capture: true });
+      window.addEventListener('pointerup', Play.onPointerUp);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && Play.pendingPromotion) Play.cancelPromotion();
+      });
+    },
+
+    isVisible() { return !Play.el.view.classList.contains('hidden'); },
+
+    /** Called whenever the Play tab becomes visible. */
+    show() {
+      if (!Play.board) Play.createBoard();
+      Play.sizeBoard();
+      Play.render();
+    },
+
+    createBoard() {
+      Play.board = Chessboard('play-board', {
+        draggable: true,
+        position: Play.game.fen(),
+        pieceTheme: Play.PIECE_URL,
+        showNotation: true,
+        onDragStart: Play.onDragStart,
+        onDrop: Play.onDrop,
+        onSnapEnd: Play.onSnapEnd,
+      });
+    },
+
+    /**
+     * Fit the board (plus anything above/below it) inside the visible area.
+     * Wide screens (lg) put the side panel beside the board, so subtract its
+     * width; narrower screens stack the panel underneath, reached by scrolling.
+     */
+    sizeBoard() {
+      if (!Play.board) return;
+      const wide = window.matchMedia('(min-width: 1024px)').matches;
+      const padding = window.matchMedia('(min-width: 640px)').matches ? 32 : 24; // p-4 / p-3
+      const availWidth = Play.el.view.clientWidth - padding - (wide ? 320 + 16 : 0);
+      const availHeight = Play.el.view.clientHeight - padding - Play.reservedBarHeight();
+      // Multiple of 8 so every square is a whole number of pixels.
+      const size = Math.floor(Math.max(240, Math.min(availWidth, availHeight, 720)) / 8) * 8;
+      // chessboard.js sizes squares from (container width - 1), so add that pixel back.
+      Play.el.col.style.width = (size + 1) + 'px';
+      Play.el.wrap.style.width = (size + 1) + 'px';
+      Play.board.resize();      // redraws squares, which drops our highlight classes...
+      Play.applyHighlights();   // ...so put them back
+    },
+
+    /** Height used above/below the board by other elements (none yet). */
+    reservedBarHeight() { return 0; },
+
+    flip() {
+      if (!Play.board) return;
+      Play.board.flip();
+      Play.applyHighlights(); // flip redraws the squares too
+      Play.render();
+    },
+
+    /** True once the game has ended and no more moves are allowed. */
+    isOver() { return Play.game.game_over(); },
+
+    // ---- chessboard.js callbacks (drag to move) ----
+
+    onDragStart(source, piece) {
+      if (Play.isOver() || Play.pendingPromotion) return false;
+      if (piece.charAt(0) !== Play.game.turn()) return false; // only the side to move
+      Play.select(source); // show legal targets while dragging
+      return true;
+    },
+
+    onDrop(source, target) {
+      if (source === target) return;          // a tap, handled by onPointerUp
+      if (target === 'offboard') return 'snapback';
+      const result = Play.tryMove(source, target, true);
+      if (result === 'illegal') return 'snapback';
+      // 'promotion': the pawn stays on the target square while the picker is open.
+    },
+
+    /** After the drop animation, redraw from chess.js (castling rook, en passant, promotion). */
+    onSnapEnd() {
+      if (!Play.pendingPromotion) Play.board.position(Play.game.fen(), false);
+    },
+
+    // ---- tap to move ----
+
+    /** The board square under a screen point, ignoring the dragged piece image on top. */
+    squareAt(x, y) {
+      for (const node of document.elementsFromPoint(x, y)) {
+        const sq = node.closest && node.closest('#play-board [data-square]');
+        if (sq) return sq.getAttribute('data-square');
+      }
+      return null;
+    },
+
+    onPointerDown(e) {
+      const square = Play.squareAt(e.clientX, e.clientY);
+      Play.tap = square ? { square, selectedBefore: Play.selected } : null;
+    },
+
+    onPointerUp(e) {
+      const t = Play.tap;
+      Play.tap = null;
+      if (!t || Play.squareAt(e.clientX, e.clientY) !== t.square) return; // a drag, or released off the board
+      Play.handleTap(t.square, t.selectedBefore);
+    },
+
+    handleTap(square, selectedBefore) {
+      if (Play.isOver() || Play.pendingPromotion) return;
+      // Second tap on a legal destination: make the move.
+      if (selectedBefore && selectedBefore !== square && Play.tryMove(selectedBefore, square, false) !== 'illegal') return;
+      const piece = Play.game.get(square);
+      if (selectedBefore === square) Play.clearSelection();                     // tap again to deselect
+      else if (piece && piece.color === Play.game.turn()) Play.select(square);  // pick up (or switch to) a piece
+      else Play.clearSelection();
+    },
+
+    select(square) {
+      Play.selected = square;
+      Play.applyHighlights();
+    },
+
+    clearSelection() {
+      Play.selected = null;
+      Play.applyHighlights();
+    },
+
+    // ---- making moves ----
+
+    /**
+     * Validate from→to against chess.js. Returns 'illegal', 'ok' (move made),
+     * or 'promotion' (picker opened; the move is made once a piece is chosen).
+     */
+    tryMove(from, to, viaDrag) {
+      const legal = Play.game.moves({ square: from, verbose: true }).filter((m) => m.to === to);
+      if (legal.length === 0) return 'illegal';
+      if (legal.some((m) => m.promotion)) {
+        Play.openPromotion(from, to, viaDrag);
+        return 'promotion';
+      }
+      Play.makeMove({ from, to }, !viaDrag);
+      return 'ok';
+    },
+
+    /**
+     * Apply a legal move. `syncBoard` redraws the board now; for drags it's
+     * false because chessboard.js is still finishing the drop (onSnapEnd syncs).
+     */
+    makeMove(moveObj, syncBoard) {
+      const move = Play.game.move(moveObj);
+      if (!move) return null;
+      Play.selected = null;
+      if (syncBoard) Play.board.position(Play.game.fen());
+      Play.afterMove(move);
+      return move;
+    },
+
+    /** Everything that should happen after any move: sound, highlights, panel. */
+    afterMove(move) {
+      if (Play.game.in_check()) Sound.check();
+      else if (move.captured) Sound.capture();
+      else Sound.move();
+      Play.applyHighlights();
+      Play.render();
+    },
+
+    // ---- promotion picker ----
+
+    openPromotion(from, to, viaDrag) {
+      const color = Play.game.turn();
+      Play.pendingPromotion = { from, to, viaDrag };
+      Play.el.promoChoices.replaceChildren(...Play.PROMOTION_PIECES.map(([p, name]) => {
+        const btn = document.createElement('button');
+        btn.className = 'rounded-xl bg-slate-700 p-1.5 transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400';
+        btn.setAttribute('aria-label', name);
+        btn.title = name;
+        const img = document.createElement('img');
+        img.src = Play.PIECE_URL.replace('{piece}', color + p.toUpperCase());
+        img.alt = '';
+        img.className = 'h-12 w-12 sm:h-14 sm:w-14';
+        btn.appendChild(img);
+        btn.addEventListener('click', () => Play.choosePromotion(p));
+        return btn;
+      }));
+      Play.el.promo.classList.remove('hidden');
+      Play.el.promo.classList.add('flex');
+      Play.el.promoChoices.firstElementChild.focus();
+    },
+
+    closePromotion() {
+      Play.pendingPromotion = null;
+      Play.el.promo.classList.add('hidden');
+      Play.el.promo.classList.remove('flex');
+    },
+
+    choosePromotion(piece) {
+      const { from, to } = Play.pendingPromotion;
+      Play.closePromotion();
+      Play.makeMove({ from, to, promotion: piece }, true);
+    },
+
+    /** Abort the promotion: put the pawn back where chess.js says it is. */
+    cancelPromotion() {
+      Play.closePromotion();
+      Play.board.position(Play.game.fen(), false);
+      Play.clearSelection();
+    },
+
+    // ---- rendering ----
+
+    /** Re-apply square highlights: last move, king in check, selection and its legal targets. */
+    applyHighlights() {
+      if (!Play.board) return;
+      const squares = document.querySelectorAll('#play-board [data-square]');
+      const classes = ['sq-last', 'sq-check', 'sq-selected', 'sq-target', 'sq-capture'];
+      const marks = {}; // square -> list of classes
+      const add = (sq, cls) => { (marks[sq] = marks[sq] || []).push(cls); };
+
+      const history = Play.game.history({ verbose: true });
+      const last = history[history.length - 1];
+      if (last) { add(last.from, 'sq-last'); add(last.to, 'sq-last'); }
+
+      if (Play.game.in_check()) {
+        const king = Play.findKing(Play.game.turn());
+        if (king) add(king, 'sq-check');
+      }
+
+      if (Play.selected) {
+        add(Play.selected, 'sq-selected');
+        Play.game.moves({ square: Play.selected, verbose: true }).forEach((m) => {
+          // Several promotion moves share one target square; mark it once.
+          if (!(marks[m.to] || []).some((c) => c === 'sq-target' || c === 'sq-capture')) {
+            add(m.to, m.captured ? 'sq-capture' : 'sq-target');
+          }
+        });
+      }
+
+      squares.forEach((node) => {
+        node.classList.remove(...classes);
+        const list = marks[node.getAttribute('data-square')];
+        if (list) node.classList.add(...list);
+      });
+    },
+
+    findKing(color) {
+      for (const file of 'abcdefgh') {
+        for (let rank = 1; rank <= 8; rank++) {
+          const sq = file + rank;
+          const p = Play.game.get(sq);
+          if (p && p.type === 'k' && p.color === color) return sq;
+        }
+      }
+      return null;
+    },
+
+    colorName(c) { return c === 'w' ? 'White' : 'Black'; },
+
+    render() {
+      const g = Play.game;
+      const turn = Play.colorName(g.turn());
+      let text = `${turn} to move`;
+      if (g.in_checkmate()) text = `Checkmate — ${Play.colorName(g.turn() === 'w' ? 'b' : 'w')} wins`;
+      else if (g.game_over()) text = 'Game over — draw';
+      else if (g.in_check()) text = `${turn} to move — check!`;
+      Play.el.status.textContent = text;
+    },
+  };
+
+  /* ==================================================================
      BOOT
      ================================================================== */
   document.addEventListener('DOMContentLoaded', () => {
     Sound.init();
     DualClock.init();
+    Play.init();
     Tabs.init();
   });
   </script>
