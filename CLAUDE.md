@@ -15,6 +15,13 @@ These URLs were verified to resolve (HTTP 200) — use exactly these:
 - **chess.js** — exposes the browser global `Chess`: `https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js`. Use the 0.10.x API consistently (`game_over()`, `in_checkmate()`, `in_threefold_repetition()`, etc.).
 - **Piece images** — `pieceTheme`: `https://cdn.jsdelivr.net/gh/oakmac/chessboardjs@v1.0.0/website/img/chesspieces/wikipedia/{piece}.png` (the npm package does not ship images).
 
+## Integrity checks (SRI) — required for every CDN script and stylesheet
+- Every `<script>`/`<link rel="stylesheet">` from a CDN must have `integrity="sha384-…"`, `crossorigin="anonymous"` and `referrerpolicy="no-referrer"`. The browser then refuses to run a file whose bytes don't match.
+- Compute a hash from the exact URL: `curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A`. Cross-check it against a second source (the project's published hash, cdnjs's SRI, or the same file from another CDN) before using it.
+- Changing a library version means recomputing its hash; a wrong hash blocks the file and breaks the app (fail-safe).
+- The CDN must send `Access-Control-Allow-Origin` for SRI to work. **Exception:** `cdn.tailwindcss.com` does not, so the Tailwind script cannot have an integrity hash.
+- Piece images (`<img>`) can't use SRI; images can't run code, so this is acceptable.
+
 ## Workflow
 - Make a git commit with a clear message after each build-plan step.
 - Pawn promotion uses a piece picker (Q/R/B/N), not auto-queen.
