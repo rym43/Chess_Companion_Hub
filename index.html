@@ -218,6 +218,13 @@
               <button id="play-undo" class="ctrl-btn justify-center"><span aria-hidden="true">&#8630;</span><span class="btn-label">Undo</span></button>
               <button id="play-resign" class="ctrl-btn justify-center"><span aria-hidden="true">&#9873;</span><span class="btn-label">Resign</span></button>
               <button id="play-flip" class="ctrl-btn justify-center"><span aria-hidden="true">&#8645;</span><span class="btn-label">Flip board</span></button>
+              <button id="play-copy-pgn" class="ctrl-btn col-span-2 justify-center" title="Copy this game in PGN format, to paste into Lichess, Chess.com or any chess app"><span aria-hidden="true">&#128203;</span><span class="btn-label">Copy PGN</span></button>
+            </div>
+
+            <!-- Shown only if the browser blocks copying: the PGN to select and copy by hand. -->
+            <div id="play-pgn-fallback" class="hidden rounded-xl bg-slate-800 p-3">
+              <p class="mb-2 text-xs text-slate-400">This browser blocked copying. Select the text below and copy it manually.</p>
+              <textarea id="play-pgn-text" readonly rows="6" class="w-full resize-y rounded-lg border border-slate-600 bg-slate-900 p-2 font-mono text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"></textarea>
             </div>
 
             <label class="flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-4 py-2.5 text-sm">
@@ -913,6 +920,9 @@
         undo: $('play-undo'),
         resign: $('play-resign'),
         flip: $('play-flip'),
+        copyPgn: $('play-copy-pgn'),
+        pgnFallback: $('play-pgn-fallback'),
+        pgnText: $('play-pgn-text'),
         control: $('play-control'),
         moves: $('play-moves'),
         moveCount: $('play-move-count'),
@@ -943,6 +953,7 @@
       Play.el.undo.addEventListener('click', Play.undo);
       Play.el.control.addEventListener('change', Play.changeControl);
       Play.el.flip.addEventListener('click', Play.flip);
+      Play.el.copyPgn.addEventListener('click', Play.copyPgn);
       Play.renderThemes();
       Play.applyTheme(Play.theme);
       Play.el.promoCancel.addEventListener('click', Play.cancelPromotion);
@@ -1040,9 +1051,14 @@
       return { initialMs: sec * 1000, incrementMs: inc * 1000 };
     },
 
-    /** Configure the timer from the current choice (resets both sides). */
+    /**
+     * Configure the timer from the current choice (resets both sides). Runs when a
+     * game is set up, so it also records the game's date and time control for the PGN.
+     */
     applyControl() {
       const control = Play.parseControl(Play.controlChoice);
+      Play.gameControl = control;
+      Play.gameDate = new Date();
       Play.clockOn = control !== null;
       if (control) Play.timer.configure(control.initialMs, control.incrementMs);
       else Play.timer.reset();
@@ -1104,16 +1120,22 @@
     /** Result decided by the position itself, or null. Specific draws are checked before in_draw(). */
     boardResult() {
       const g = Play.game;
+      // `score` and `termination` are the PGN Result and Termination tags.
+      const draw = { score: '1/2-1/2', termination: 'normal', undoable: true };
       if (g.in_checkmate()) {
-        return { text: `Checkmate — ${Play.colorName(Play.other(g.turn()))} wins`, undoable: true };
+        const winner = Play.other(g.turn());
+        return { text: `Checkmate — ${Play.colorName(winner)} wins`, score: Play.winScore(winner), termination: 'normal', undoable: true };
       }
-      if (g.in_stalemate()) return { text: 'Draw by stalemate', undoable: true };
-      if (g.in_threefold_repetition()) return { text: 'Draw by threefold repetition', undoable: true };
-      if (g.insufficient_material()) return { text: 'Draw by insufficient material', undoable: true };
+      if (g.in_stalemate()) return { ...draw, text: 'Draw by stalemate' };
+      if (g.in_threefold_repetition()) return { ...draw, text: 'Draw by threefold repetition' };
+      if (g.insufficient_material()) return { ...draw, text: 'Draw by insufficient material' };
       // in_draw() also covers the cases above; what's left is the 50-move rule.
-      if (g.in_draw()) return { text: 'Draw by the 50-move rule', undoable: true };
+      if (g.in_draw()) return { ...draw, text: 'Draw by the 50-move rule' };
       return null;
     },
+
+    /** PGN score for a win by `color`. */
+    winScore(color) { return color === 'w' ? '1-0' : '0-1'; },
 
     /**
      * Can `color` still deliver checkmate with its remaining material?
@@ -1138,8 +1160,8 @@
       const loser = side === 0 ? 'w' : 'b';
       const winner = Play.other(loser);
       Play.result = Play.canMate(winner)
-        ? { text: `${Play.colorName(winner)} wins on time`, undoable: false }
-        : { text: `Draw — ${Play.colorName(loser)} ran out of time, but ${Play.colorName(winner)} can't checkmate`, undoable: false };
+        ? { text: `${Play.colorName(winner)} wins on time`, score: Play.winScore(winner), termination: 'time forfeit', undoable: false }
+        : { text: `Draw — ${Play.colorName(loser)} ran out of time, but ${Play.colorName(winner)} can't checkmate`, score: '1/2-1/2', termination: 'time forfeit', undoable: false };
       if (Play.pendingPromotion) Play.cancelPromotion();
       Play.selected = null;
       Sound.flag();
@@ -1151,7 +1173,12 @@
     resign() {
       if (Play.isOver()) return;
       const mover = Play.game.turn();
-      Play.result = { text: `${Play.colorName(mover)} resigns — ${Play.colorName(Play.other(mover))} wins`, undoable: false };
+      Play.result = {
+        text: `${Play.colorName(mover)} resigns — ${Play.colorName(Play.other(mover))} wins`,
+        score: Play.winScore(Play.other(mover)),
+        termination: 'normal',
+        undoable: false,
+      };
       Play.timer.stop();
       if (Play.pendingPromotion) Play.cancelPromotion();
       Play.selected = null;
@@ -1171,6 +1198,87 @@
       Play.applyControl();
       Play.applyHighlights();
       Play.render();
+    },
+
+    // ---- PGN export ----
+
+    /**
+     * The game in PGN (Portable Game Notation), the standard text format chess
+     * apps import. Moves are replayed into a fresh Chess object so the tags
+     * always match the current state (e.g. no stale Result after an Undo).
+     */
+    buildPgn() {
+      const pgnGame = new Chess();
+      Play.game.history().forEach((san) => pgnGame.move(san));
+
+      const d = Play.gameDate;
+      const date = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+      const c = Play.gameControl;
+      // The Seven Tag Roster first, in its standard order, then optional tags.
+      const tags = [
+        ['Event', 'Casual game'],
+        ['Site', 'Chess Companion Hub'],
+        ['Date', date],
+        ['Round', '-'],
+        ['White', 'White'],
+        ['Black', 'Black'],
+        ['Result', Play.result ? Play.result.score : '*'], // '*' = game still in progress
+        ['TimeControl', c ? `${c.initialMs / 1000}+${c.incrementMs / 1000}` : '-'],
+      ];
+      if (Play.result) tags.push(['Termination', Play.result.termination]);
+      tags.forEach(([name, value]) => pgnGame.header(name, value));
+      // chess.js appends the Result tag's value after the last move, as PGN requires.
+      return pgnGame.pgn({ max_width: 80, newline_char: '\n' });
+    },
+
+    /**
+     * Copy the PGN to the clipboard. navigator.clipboard needs a secure page
+     * (https, as on GitHub Pages); the older execCommand route covers some
+     * other cases; if both fail, show the text so it can be copied by hand.
+     */
+    async copyPgn() {
+      const pgn = Play.buildPgn();
+      let copied = false;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(pgn);
+          copied = true;
+        }
+      } catch (e) { /* fall through to the older method */ }
+      if (!copied) copied = Play.legacyCopy(pgn);
+
+      Play.el.pgnText.value = pgn;
+      Play.el.pgnFallback.classList.toggle('hidden', copied);
+      if (copied) {
+        Play.flashLabel(Play.el.copyPgn, 'Copied!');
+      } else {
+        Play.el.pgnText.focus();
+        Play.el.pgnText.select();
+      }
+    },
+
+    /** Copy via a temporary off-screen textarea and document.execCommand('copy'). */
+    legacyCopy(text) {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      area.remove();
+      Play.el.copyPgn.focus({ preventScroll: true }); // the textarea took focus; give it back
+      return ok;
+    },
+
+    /** Briefly replace a button's label (e.g. "Copied!"), then restore it. */
+    flashLabel(btn, text) {
+      const label = btn.querySelector('.btn-label');
+      clearTimeout(Play.flashTimer);
+      label.textContent = text;
+      Play.flashTimer = setTimeout(() => { label.textContent = 'Copy PGN'; }, 1800);
     },
 
     /** Undo is allowed during play and after a board result, but not after a flag or resignation. */
@@ -1558,6 +1666,9 @@
       const el = Play.el;
       el.undo.disabled = !Play.canUndo();
       el.resign.disabled = Play.isOver();
+      el.copyPgn.disabled = Play.game.history().length === 0;
+      // A shown fallback PGN goes stale as soon as the game changes, so hide it.
+      el.pgnFallback.classList.add('hidden');
       el.control.disabled = Play.inProgress();
       el.control.value = Play.controlChoice;
       // Don't overwrite a button that is waiting for its confirmation tap.
