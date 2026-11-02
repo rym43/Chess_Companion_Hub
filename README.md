@@ -28,15 +28,17 @@ An all-in-one chess companion for playing in person: a two-player chess clock, a
 
 ## Tech stack
 
-| What | Library (all loaded from a CDN, pinned versions) |
+| What | Library (pinned versions) |
 | --- | --- |
-| Styling | [Tailwind CSS](https://tailwindcss.com/) 3.4.17 (Play CDN) |
+| Styling | [Tailwind CSS](https://tailwindcss.com/) 3.4.17 (Play CDN script, embedded in the page) |
 | Move rules and game state | [chess.js](https://github.com/jhlywa/chess.js) 0.10.3 |
 | Board | [chessboard.js](https://chessboardjs.com/) 1.0.0, which needs [jQuery](https://jquery.com/) 3.7.1 |
 | Piece images | chessboard.js's Wikipedia piece set, via jsDelivr |
 | Everything else | Plain JavaScript; sounds are generated in the browser with the Web Audio API |
 
 The whole app is one file: [`index.html`](index.html).
+
+**Security:** every library loaded from a CDN carries a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hash, so the browser refuses any file that has been altered. Tailwind's CDN can't support these checks, so a verified copy of Tailwind is embedded in the page instead.
 
 ## How to run
 
