@@ -22,6 +22,15 @@ These URLs were verified to resolve (HTTP 200) — use exactly these:
 - The CDN must send `Access-Control-Allow-Origin` for SRI to work. A library whose CDN doesn't (like `cdn.tailwindcss.com`) is embedded inline instead, so no unverified code is ever loaded.
 - Piece images (`<img>`) can't use SRI; images can't run code, so this is acceptable.
 
+## Content Security Policy (CSP) — keep it in sync
+- `index.html` has a strict CSP `<meta>` right after `<meta charset>`. Scripts may run only from the 3 library URLs listed in `script-src` and the page's **2 inline `<script>` blocks, identified by sha256 hash**. Everything else (injected scripts, inline `on…=` handlers, `eval`, network requests) is blocked.
+- **After ANY edit to an inline `<script>` (the app code or the embedded Tailwind), recompute both hashes and update `script-src`**, or the browser will refuse to run that script and the app will break. Compute them with:
+  `python -c "import re,hashlib,base64;h=open('index.html',encoding='utf-8').read().replace('\r\n','\n');print(*[\"'sha256-\"+base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()+\"'\" for s in re.findall(r'^\s*<script>(.*?)</script>',h,re.S|re.M)])"`
+  (It only matches `<script>` at the start of a line, so the text "<script>" inside comments can't confuse it.)
+- Never use inline event handlers (`onclick="…"`), `eval`, `new Function`, or `javascript:` URLs; use `addEventListener`.
+- Adding or upgrading a library: add its exact URL to `script-src`/`style-src`. Adding a network feature (e.g. a visitor counter): add its endpoint to `connect-src`.
+- After changing anything, load the page and check the console for `Content Security Policy` errors.
+
 ## Workflow
 - Make a git commit with a clear message after each build-plan step.
 - Pawn promotion uses a piece picker (Q/R/B/N), not auto-queen.

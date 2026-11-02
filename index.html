@@ -2,6 +2,11 @@
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8">
+  <!-- Content Security Policy: the browser runs ONLY the scripts listed here (3 library
+       files by exact URL + the page's 2 inline scripts by sha256 hash) and blocks any
+       other code. Editing an inline script block changes its hash: refresh this line
+       afterwards (see CLAUDE.md) or the browser will refuse to run that script. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-F26JRmGqnNyaXLpscgBEy797i9gNHJoUKnwksbbFDRU=' 'sha256-0cI8eDptfTYrlpTZGZwXmsEWh0J7yhFhiYecyIFk2dM=' https://code.jquery.com/jquery-3.7.1.min.js https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js; style-src 'unsafe-inline' https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css; img-src https://cdn.jsdelivr.net/gh/oakmac/chessboardjs@v1.0.0/website/img/chesspieces/wikipedia/; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!-- The page is already dark: this stops phone browsers' "dark mode for websites"
        from auto-darkening it again (which turns the light board squares dark). -->

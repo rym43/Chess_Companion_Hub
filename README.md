@@ -38,7 +38,7 @@ An all-in-one chess companion for playing in person: a two-player chess clock, a
 
 The whole app is one file: [`index.html`](index.html).
 
-**Security:** every library loaded from a CDN carries a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hash, so the browser refuses any file that has been altered. Tailwind's CDN can't support these checks, so a verified copy of Tailwind is embedded in the page instead.
+**Security:** every library loaded from a CDN carries a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hash, so the browser refuses any file that has been altered. Tailwind's CDN can't support these checks, so a verified copy of Tailwind is embedded in the page instead. A strict [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP) lets the browser run only those known scripts and blocks network requests, so injected code can't run or send data anywhere.
 
 ## How to run
 
